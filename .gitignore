@@ -9,3 +9,6 @@ context.md
 
 .DS_Store
 *.swp
+
+# SwiftPM
+.build/

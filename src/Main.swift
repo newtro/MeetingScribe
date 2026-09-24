@@ -86,9 +86,22 @@ enum FileTest {
                 let store = try SessionStore(start: Date())
                 SelfTest.log("filetest → \(store.dir.path)")
                 var ts: [ChannelTranscriber] = []
+                var ds: [ChannelDiarizer] = []
                 for (ch, path) in [(Channel.remote, remotePath), (.local, localPath)] {
                     let t = try await ChannelTranscriber.make(channel: ch, locale: locale)
-                    t.onFinal = { u in store.append(u); SelfTest.log("FINAL \(u.ch.label): \(u.text)") }
+                    let d = ChannelDiarizer(channel: ch)
+                    d.onError = { m in SelfTest.log("ERROR \(m)") }
+                    d.start()
+                    ds.append(d)
+                    t.onAudio = { d.feed($0) }
+                    t.onFinal = { u, start, end in
+                        d.label(start: start, end: end) { spk in
+                            var u = u
+                            u.spk = spk
+                            store.append(u)
+                            SelfTest.log(String(format: "FINAL %@ %@ [%.2f–%.2f]: %@", u.ch.label, spk ?? "?", start, end, u.text))
+                        }
+                    }
                     t.onError = { c, m in SelfTest.log("ERROR \(c.label): \(m)") }
                     try await t.start(wallStart: Date())
                     ts.append(t)
@@ -116,6 +129,7 @@ enum FileTest {
                 }.max() ?? 0
                 try? await Task.sleep(for: .seconds(maxLen * 1.2 + 2))
                 for t in ts { await t.finish() }
+                for d in ds { d.finish() }
                 store.close()
                 SelfTest.log("filetest done")
                 exit(0)
@@ -153,7 +167,8 @@ enum DevModes {
             for (i, l) in lines.enumerated() {
                 guard let o = try? JSONSerialization.jsonObject(with: Data(l.utf8)) as? [String: Any],
                       let text = o["text"] as? String, let ch = Channel(rawValue: o["ch"] as? String ?? "") else { continue }
-                us.append(Utterance(t: now.addingTimeInterval(Double(i - lines.count) * 8), ch: ch, text: text))
+                us.append(Utterance(t: now.addingTimeInterval(Double(i - lines.count) * 8), ch: ch, text: text,
+                                    spk: o["spk"] as? String))
             }
             let a = Advisor()
             if let brief { a.setContext(URL(fileURLWithPath: brief)) }
@@ -186,10 +201,10 @@ enum DevModes {
         m.advisorStatus = "Last check 10:32:14 — 3 new"
         // Invented sample data for UI renders — keep real meeting content out of the repo.
         m.utterances = [
-            Utterance(t: now.addingTimeInterval(-60), ch: .remote, text: "We'd also like the dashboard to export straight into our finance system every week."),
-            Utterance(t: now.addingTimeInterval(-52), ch: .remote, text: "Can you just add that to the reporting module?"),
-            Utterance(t: now.addingTimeInterval(-40), ch: .local, text: "Yeah, I think we can probably fold that into the reporting work."),
-            Utterance(t: now.addingTimeInterval(-20), ch: .remote, text: "Great. And the weekend team needs its own approval flow too."),
+            Utterance(t: now.addingTimeInterval(-60), ch: .remote, text: "We'd also like the dashboard to export straight into our finance system every week.", spk: "R1"),
+            Utterance(t: now.addingTimeInterval(-52), ch: .remote, text: "Can you just add that to the reporting module?", spk: "R2"),
+            Utterance(t: now.addingTimeInterval(-40), ch: .local, text: "Yeah, I think we can probably fold that into the reporting work.", spk: "L1"),
+            Utterance(t: now.addingTimeInterval(-20), ch: .remote, text: "Great. And the weekend team needs its own approval flow too.", spk: "R1"),
         ]
         m.volatile = [.local: "Let me make sure I understand the timing"]
         let a = [

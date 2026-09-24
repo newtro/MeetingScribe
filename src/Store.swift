@@ -11,6 +11,8 @@ struct Utterance: Identifiable, Sendable {
     let t: Date
     let ch: Channel
     let text: String
+    /// Diarized speaker within the channel (R1…R8 / L1…L8), arrival-ordered per session; nil if unknown.
+    var spk: String? = nil
 }
 
 enum Paths {
@@ -88,7 +90,9 @@ final class SessionStore: @unchecked Sendable {
     }
 
     func append(_ u: Utterance) {
-        let json = "{\"t\":\"\(Fmt.iso.string(from: u.t))\",\"ch\":\"\(u.ch.rawValue)\",\"text\":\(Fmt.jsonString(u.text))}\n"
+        // "spk" is additive and last; transcript.txt stays unchanged (another session reads both).
+        let spk = u.spk.map { ",\"spk\":\(Fmt.jsonString($0))" } ?? ""
+        let json = "{\"t\":\"\(Fmt.iso.string(from: u.t))\",\"ch\":\"\(u.ch.rawValue)\",\"text\":\(Fmt.jsonString(u.text))\(spk)}\n"
         let line = "[\(Fmt.clock.string(from: u.t))] \(u.ch.label): \(u.text)\n"
         queue.sync {
             write(jsonl, json)

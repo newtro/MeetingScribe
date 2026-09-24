@@ -419,6 +419,7 @@ struct TranscriptPane: View {
                                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                                     Text("  …   ").font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
                                     ChannelTag(ch: ch).opacity(0.6)
+                                    Color.clear.frame(width: 18, height: 1)  // speaker column of UtteranceRow
                                     Text(v).italic().foregroundStyle(.secondary)
                                 }
                             }
@@ -458,6 +459,10 @@ struct UtteranceRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Text(Fmt.clock.string(from: u.t)).font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
             ChannelTag(ch: u.ch)
+            Text(u.spk ?? "")
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, alignment: .leading)
             Text(u.text).font(.body)
                 .foregroundStyle(u.ch == .local ? Palette.local : .primary)
         }

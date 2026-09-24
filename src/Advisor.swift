@@ -61,7 +61,8 @@ final class Advisor: @unchecked Sendable {
             .filter { $0.t >= cutoff }
             .sorted { $0.t < $1.t }
             .map { u in
-                let who = u.ch == .remote ? "REMOTE (call audio)" : "LOCAL (Scott's microphone)"
+                let spk = u.spk.map { " speaker \($0)" } ?? ""
+                let who = u.ch == .remote ? "REMOTE\(spk) (call audio)" : "LOCAL\(spk) (Scott's microphone)"
                 return "[\(Fmt.clock.string(from: u.t))] \(who): \(u.text)"
             }
             .joined(separator: "\n")

@@ -22,7 +22,10 @@ final class ChannelTranscriber: @unchecked Sendable {
     private var framesFed: Int64 = 0
     private var wallStart = Date()
 
-    var onFinal: (@Sendable (Utterance) -> Void)?
+    /// Final text plus its analyzer-timeline range in seconds (start, end), for speaker lookup.
+    var onFinal: (@Sendable (Utterance, Double, Double) -> Void)?
+    /// Every buffer handed to the analyzer, silence padding included, on the capture queue. Must not block.
+    var onAudio: ((AVAudioPCMBuffer) -> Void)?
     var onVolatile: (@Sendable (Channel, String) -> Void)?
     var onError: (@Sendable (Channel, String) -> Void)?
 
@@ -62,10 +65,11 @@ final class ChannelTranscriber: @unchecked Sendable {
                     if result.isFinal {
                         self?.onVolatile?(ch, "")
                         guard !text.isEmpty else { continue }
-                        let offset = result.range.start.seconds
+                        let offset = result.range.start.seconds.isFinite ? result.range.start.seconds : 0
+                        let end = result.range.end.seconds.isFinite ? result.range.end.seconds : offset
                         let base = self?.wallStart ?? Date()
-                        let t = base.addingTimeInterval(offset.isFinite ? offset : 0)
-                        self?.onFinal?(Utterance(t: t, ch: ch, text: text))
+                        let t = base.addingTimeInterval(offset)
+                        self?.onFinal?(Utterance(t: t, ch: ch, text: text), offset, end)
                     } else {
                         self?.onVolatile?(ch, text)
                     }
@@ -125,6 +129,7 @@ final class ChannelTranscriber: @unchecked Sendable {
         if err != nil || out.frameLength == 0 { return }
         framesFed += Int64(out.frameLength)
         inputBuilder.yield(AnalyzerInput(buffer: out))
+        onAudio?(out)
     }
 
     private func yieldSilence(seconds: Double) {
@@ -138,6 +143,7 @@ final class ChannelTranscriber: @unchecked Sendable {
             for b in abl { if let p = b.mData { memset(p, 0, Int(b.mDataByteSize)) } }
             framesFed += Int64(n)
             inputBuilder.yield(AnalyzerInput(buffer: buf))
+            onAudio?(buf)
             remaining -= n
         }
     }

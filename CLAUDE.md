@@ -23,7 +23,13 @@ unmounted.
 ./build.sh --install  # also installs to /Applications and registers with LaunchServices/Spotlight
 ```
 
-`swiftc -swift-version 5` (Swift 5 language mode on purpose — avoids strict-concurrency churn).
+SwiftPM (`Package.swift`, sources in `src/`), Swift 5 language mode on purpose — avoids strict-concurrency
+churn. FluidAudio is pinned `exact: "0.17.1"` with `traits: []` (drops its prebuilt text-normalization engine).
+`build.sh` fetches the diarization model once into `build/models/Nemotron3` (pinned HF revision, ~200 MB) and
+copies it into `Contents/Resources/Nemotron3`, so meetings never download anything. If SwiftPM hangs fetching
+FluidAudio's `NemoTextProcessing` binary artifact (it still resolves it with the trait off), curl the zip from
+the URL in FluidAudio's `Package.swift` into `~/Library/Caches/org.swift.swiftpm/artifacts/` under SwiftPM's
+underscored-URL file name.
 Signed with the stable **"ImageSmith Dev"** identity so the Screen Recording (TCC) grant survives
 rebuilds. **Do not switch back to ad-hoc (`SIGN_ID=-`)**: ad-hoc ties the grant to the binary
 hash, every rebuild silently revokes it, and capture fails with SCStreamError -3801.
@@ -36,11 +42,18 @@ hash, every rebuild silently revokes it, and capture fails with SCStreamError -3
 - `Transcriber.swift` — one `SpeechAnalyzer` + `SpeechTranscriber` per channel, on-device.
   Converts CMSampleBuffer → analyzer format; pads silence on PTS gaps so `result.range` maps to
   wall-clock time. Volatile results → live pane only; finals → files.
-- `Recorder.swift` — wires capture → transcribers → `SessionStore`, plus `EchoFilter`: holds
+- `Diarizer.swift` — NVIDIA Nemotron 3 Diarization via FluidAudio (Core ML, `Nemotron3Config.fast32` = 2.88 s
+  streaming, ≤8 speakers per channel). One `ChannelDiarizer` per channel, fed the exact buffers (incl. silence
+  padding) the analyzer gets via `ChannelTranscriber.onAudio`, so 10 ms frame *i* = analyzer time *i*·10 ms.
+  One shared model and one serial queue for both channels. Each final waits ≤4 s for the diarizer to cover its
+  `result.range`, gets the probability-weighted majority speaker (`R1…R8` / `L1…L8`, arrival order, per
+  session), and requests resolve in order. Model missing/failing → one error, lines written unlabeled.
+- `Recorder.swift` — wires capture → transcribers (+ diarizers) → `SessionStore`, plus `EchoFilter`: holds
   LOCAL finals ~8s and drops any that closely match a REMOTE final within ±20s (speaker bleed
   when not on headphones).
 - `Store.swift` — writes `sessions/<ISO8601 start>/transcript.jsonl`
-  (`{"t","ch":"remote"|"local","text"}`) and `transcript.txt` (`[HH:MM:SS] REMOTE: …`),
+  (`{"t","ch":"remote"|"local","text","spk"?}` — `spk` only when known) and `transcript.txt`
+  (`[HH:MM:SS] REMOTE: …`, deliberately without speakers),
   fsync'd per write. Also `Paths.briefs()`: `context.md` + `contexts/*.md`, newest first.
 - `Advisor.swift` — every 45s and on "Ask now": `claude -p --output-format text --tools ""
   --strict-mcp-config --no-session-persistence`, prompt = selected brief verbatim + last 4 min of
@@ -58,20 +71,10 @@ hash, every rebuild silently revokes it, and capture fails with SCStreamError -3
 
 ## Known limits
 
-- **No speaker attribution.** LOCAL vs REMOTE is the only split. Every remote participant is
-  one undifferentiated REMOTE stream; in an in-person meeting everyone is LOCAL. The advisor
-  prompt labels LOCAL as "Scott's microphone", which is wrong for in-room meetings.
+- **Speaker labels are anonymous and per channel.** `R2` is "second remote voice heard this
+  session", not a person, and R/L slots are independent (the same person is never linked across
+  channels or sessions). >8 speakers on a channel degrades silently. Without headphones the LOCAL
+  diarizer also hears the call, which can use up L slots even though EchoFilter drops the text.
+- One speaker per final: a final spanning a speaker change gets the majority speaker.
+- The advisor prompt labels LOCAL as "Scott's microphone", which is wrong for in-room meetings.
 - Transcript lines are appended in finalization order, so `t` can be a few seconds out of order.
-
-## Current investigation
-
-Adding **speaker diarization** — evaluating NVIDIA's Nemotron diarization model — so REMOTE
-(and in-room LOCAL) can be split into individual speakers. Constraints any approach must meet:
-
-- **Stays on-device.** No audio leaves the machine; only transcript text goes to the CLI.
-- **Must not block or slow the capture pipeline.** Diarization should consume the same audio
-  the transcribers get, off the capture queue.
-- **Must keep the file contract.** Adding a speaker field is fine only if it is additive
-  (e.g. a new `"spk"` key in `transcript.jsonl`); `ch` and `text` must keep their meaning.
-- Speaker labels must line up with `SpeechTranscriber` result time ranges (`result.range`,
-  already requested via `.audioTimeRange`).

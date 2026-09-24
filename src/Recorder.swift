@@ -1,11 +1,13 @@
 import Foundation
 
-/// Capture → two transcribers → session files. No UI dependencies; used by the app and by --selftest.
+/// Capture → two transcribers (+ a diarizer per channel) → session files. No UI dependencies; used by the app
+/// and by --selftest.
 @available(macOS 26.0, *)
 final class Recorder: @unchecked Sendable {
     private let capture = AudioCapture()
     private var remote: ChannelTranscriber?
     private var local: ChannelTranscriber?
+    private var diarizers: [ChannelDiarizer] = []
     private(set) var store: SessionStore?
     private var echo = EchoFilter(emit: { _ in })
 
@@ -27,7 +29,19 @@ final class Recorder: @unchecked Sendable {
         let r = try await ChannelTranscriber.make(channel: .remote, locale: locale)
         let l = try await ChannelTranscriber.make(channel: .local, locale: locale)
         for t in [r, l] {
-            t.onFinal = { [weak self] u in self?.echo.submit(u) }
+            // Each final waits (bounded) for its speaker label, then goes through the echo filter as before.
+            let d = ChannelDiarizer(channel: t.channel)
+            d.onError = { [weak self] msg in self?.onError?(msg) }
+            d.start()
+            diarizers.append(d)
+            t.onAudio = { d.feed($0) }
+            t.onFinal = { [echo] u, start, end in
+                d.label(start: start, end: end) { spk in
+                    var u = u
+                    u.spk = spk
+                    echo.submit(u)
+                }
+            }
             t.onVolatile = { [weak self] ch, text in self?.onVolatile?(ch, text) }
             t.onError = { [weak self] ch, msg in self?.onError?("\(ch.label) transcriber: \(msg)") }
             try await t.start(wallStart: start)
@@ -43,6 +57,8 @@ final class Recorder: @unchecked Sendable {
         } catch {
             await r.finish()
             await l.finish()
+            for d in diarizers { d.finish() }
+            diarizers = []
             store.close()
             self.store = nil
             // Don't leave an empty session folder behind for a start that never recorded.
@@ -60,6 +76,8 @@ final class Recorder: @unchecked Sendable {
         async let a: Void = remote?.finish() ?? ()
         async let b: Void = local?.finish() ?? ()
         _ = await (a, b)
+        for d in diarizers { d.finish() }  // labels any finals still waiting, before the echo filter flushes
+        diarizers = []
         echo.flush()
         remote = nil
         local = nil

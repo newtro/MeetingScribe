@@ -14,7 +14,6 @@ struct Suggestion: Identifiable, Sendable {
 /// Shells out to `claude -p`. The prompt is context.md verbatim plus the labeled transcript window —
 /// context.md owns the instructions and the output contract; nothing is layered on top.
 final class Advisor: @unchecked Sendable {
-    static let claudePath = "/Users/scott/.local/bin/claude"
     static let window: TimeInterval = 4 * 60
     static let timeout: TimeInterval = 30
 
@@ -55,21 +54,26 @@ final class Advisor: @unchecked Sendable {
         return contextText
     }
 
-    static func transcriptBlock(_ utterances: [Utterance], now: Date) -> String {
+    static func transcriptBlock(_ utterances: [Utterance], now: Date, names: [String: String] = [:]) -> String {
         let cutoff = now.addingTimeInterval(-window)
         return utterances
             .filter { $0.t >= cutoff }
             .sorted { $0.t < $1.t }
-            .map { u in
-                let spk = u.spk.map { " speaker \($0)" } ?? ""
-                let who = u.ch == .remote ? "REMOTE\(spk) (call audio)" : "LOCAL\(spk) (Scott's microphone)"
-                return "[\(Fmt.clock.string(from: u.t))] \(who): \(u.text)"
-            }
+            .map { u in "[\(Fmt.clock.string(from: u.t))] \(speakerLabel(u, names: names)): \(u.text)" }
             .joined(separator: "\n")
     }
 
+    /// "REMOTE Bethany [R2] (call audio)", "LOCAL speaker L1 (Scott's microphone)".
+    static func speakerLabel(_ u: Utterance, names: [String: String]) -> String {
+        var who = u.ch.label
+        if let spk = u.spk {
+            who += names[spk].map { " \($0) [\(spk)]" } ?? " speaker \(spk)"
+        }
+        return who + (u.ch == .remote ? " (call audio)" : " (\(Prefs.user)'s microphone)")
+    }
+
     /// Runs one cycle off the caller's thread. Drops the cycle if one is already running.
-    func run(utterances: [Utterance]) async -> Outcome {
+    func run(utterances: [Utterance], names: [String: String] = [:]) async -> Outcome {
         let acquired = lock.withLock { () -> Bool in
             if inFlight { return false }
             inFlight = true
@@ -79,7 +83,7 @@ final class Advisor: @unchecked Sendable {
         defer { lock.withLock { inFlight = false } }
 
         let now = Date()
-        let transcript = Self.transcriptBlock(utterances, now: now)
+        let transcript = Self.transcriptBlock(utterances, now: now, names: names)
         if transcript.isEmpty { return .skipped("no transcript in the last 4 minutes") }
         let context: String
         do { context = try currentContext() } catch { return .failed("can't read brief: \(error.localizedDescription)") }
@@ -101,54 +105,16 @@ final class Advisor: @unchecked Sendable {
     enum RunResult { case success(String), failure(String) }
 
     static func runClaude(prompt: String) async -> RunResult {
-        await withCheckedContinuation { cont in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: claudePath)
-                p.arguments = ["-p", "--output-format", "text",
-                               "--tools", "", "--strict-mcp-config", "--no-session-persistence"]
+        do {
+            let out = try await ClaudeCLI.Run().run(
+                args: ["-p", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
                 // Neutral cwd so no project CLAUDE.md is picked up.
-                p.currentDirectoryURL = FileManager.default.temporaryDirectory
-                var env = ProcessInfo.processInfo.environment
-                env["PATH"] = "/Users/scott/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-                p.environment = env
-                let inPipe = Pipe(), outPipe = Pipe(), errPipe = Pipe()
-                p.standardInput = inPipe
-                p.standardOutput = outPipe
-                p.standardError = errPipe
-
-                var outData = Data(), errData = Data()
-                let group = DispatchGroup()
-                group.enter()
-                DispatchQueue.global().async { outData = outPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-                group.enter()
-                DispatchQueue.global().async { errData = errPipe.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-
-                do { try p.run() } catch {
-                    cont.resume(returning: .failure("can't launch claude: \(error.localizedDescription)"))
-                    return
-                }
-                DispatchQueue.global().async {
-                    try? inPipe.fileHandleForWriting.write(contentsOf: Data(prompt.utf8))
-                    try? inPipe.fileHandleForWriting.close()
-                }
-                var timedOut = false
-                let killer = DispatchWorkItem {
-                    if p.isRunning { timedOut = true; p.terminate() }
-                }
-                DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
-                p.waitUntilExit()
-                killer.cancel()
-                _ = group.wait(timeout: .now() + 2)
-                if timedOut {
-                    cont.resume(returning: .failure("timed out after \(Int(timeout))s, cycle dropped"))
-                } else if p.terminationStatus != 0 {
-                    let err = String(data: errData, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    cont.resume(returning: .failure("claude exited \(p.terminationStatus): \(err.prefix(200))"))
-                } else {
-                    cont.resume(returning: .success(String(data: outData, encoding: .utf8) ?? ""))
-                }
-            }
+                cwd: FileManager.default.temporaryDirectory, stdin: prompt, timeout: timeout)
+            return .success(out)
+        } catch let e as ClaudeCLI.Failure where e.message.hasPrefix("timed out") {
+            return .failure("timed out after \(Int(timeout))s, cycle dropped")
+        } catch {
+            return .failure(error.localizedDescription)
         }
     }
 

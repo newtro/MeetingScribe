@@ -9,7 +9,7 @@ context brief. Used in live client meetings.
 | What | Where |
 | --- | --- |
 | **Source + build** (this repo) | `/Volumes/Cache/repos/MeetingScribe` |
-| **Runtime data** | `~/Documents/MeetingScribe` — `context.md`, `contexts/*.md`, `sessions/` |
+| **Runtime data** | `~/Documents/MeetingScribe` — `context.md`, `contexts/*.md` (+ `contexts/.meta/`), `sessions/` |
 
 The data path is hardcoded in `src/Store.swift` (`Paths.root`). Another Claude session reads
 `sessions/` live, so the paths and file formats there are a contract — do not change them.
@@ -60,14 +60,36 @@ hash, every rebuild silently revokes it, and capture fails with SCStreamError -3
   transcript. 30s timeout. Parses ASK/FLAG/ANSWER items, dedupes against the last 3 responses
   (content-word overlap ≥ 0.35 with a boilerplate stoplist), appends to `suggestions.md`.
   The brief owns the instructions; the app adds none.
-- `App.swift` — SwiftUI. Control bar (Start/Stop, RECORDING badge, elapsed, brief picker,
-  Ask now, text size), transcript pane, suggestions pane (FLAG most prominent).
+- `ClaudeCLI.swift` — finds and runs the `claude` CLI (path overridable in Settings), streams stdout
+  lines; `Prefs` holds the UserDefaults keys (user name, advisor interval, auto-summary, brief model).
+- `BriefBuilder.swift` — New Meeting → brief. `claude -p --output-format stream-json --restricted
+  --tools Read,Glob,Grep,Bash[,WebSearch] --add-dir <folders> --add-dir ~`: Claude reads the chosen
+  folders and anything else under ~ it needs; Bash is limited to the CLI's read-only commands (headless,
+  any write is refused — verified). `--restricted` also ignores the user's own Claude settings so a
+  permissive allow rule can't make it a writer. The app adds a git snapshot of repo folders to the
+  prompt. Output = brief in the house shape (Your job / The meeting / People / facts / guardrails /
+  questions / leave-with) → `contexts/<date>-<slug>.md`, inputs → `contexts/.meta/<name>.json`, previous
+  version on revise → `contexts/.meta/<name>.prev.md`. Also `Summarizer` (post-meeting summary, no tools).
+- `Meeting.swift` — additive per-session files beside the contract files: `meeting.json` (title,
+  description, brief, materials, start/end), `speakers.json` (`{"R2":"Bethany"}`), `notes.md`,
+  `highlights.jsonl` (`{"t","note"}`), `summary.md`. `SessionInfo` = library rows; `Export.markdown`.
+- `App.swift` — `AppModel` (routes: prep / live / brief / session), window, `Meeting` menu
+  (⇧⌘R start/stop, ⌘↩ ask, ⌘B mark moment, ⌘N new meeting), menu-bar extra, Settings. Closing the
+  window does not quit (recording can continue from the menu bar).
+- `Views/` — `Root` (sidebar: New Meeting, Briefs, Meetings; banners; Settings), `Prep` (New Meeting
+  form, build progress, brief reader/editor with "ask Claude to revise"), `MeetingViews` (live control
+  bar + transcript + Suggestions/Notes/Brief tabs; past-meeting review with Summary/Suggestions/Notes,
+  export, copy, rename), `Components` (speaker chips with click-to-name, transcript with search and
+  grouped turns, suggestion cards, a small block Markdown renderer).
 - `Main.swift` — dev modes:
   - `--selftest N` live capture for N seconds (run via `open -W /Applications/MeetingScribe.app --args --selftest 60`
     so TCC attributes it to the bundle); logs to `~/Documents/MeetingScribe/selftest.log`
   - `--filetest remote.wav local.wav` feeds audio files through the real transcription path
   - `--advisortest transcript.jsonl [--brief path]` runs two advisor cycles
-  - `--render out.png [--dark] [--idle]` renders the UI offscreen with sample data
+  - `--render out.png [--dark] [--route prep|build|live|brief|session]` renders the UI offscreen with
+    sample data (sidebar renders blank offscreen; screenshot the real window for that)
+  - `--buildbrief <folder|-> "<description>" [--out path]` headless brief build, steps on stderr
+  - `--summarize <session dir>` prints a summary without writing summary.md
 
 ## Known limits
 
@@ -76,5 +98,6 @@ hash, every rebuild silently revokes it, and capture fails with SCStreamError -3
   channels or sessions). >8 speakers on a channel degrades silently. Without headphones the LOCAL
   diarizer also hears the call, which can use up L slots even though EchoFilter drops the text.
 - One speaker per final: a final spanning a speaker change gets the majority speaker.
-- The advisor prompt labels LOCAL as "Scott's microphone", which is wrong for in-room meetings.
+- The advisor prompt labels LOCAL as "<user>'s microphone", which is wrong for in-room meetings.
+- Speaker names are per session (speakers.json); nothing carries a voice→name mapping across meetings.
 - Transcript lines are appended in finalization order, so `t` can be a few seconds out of order.

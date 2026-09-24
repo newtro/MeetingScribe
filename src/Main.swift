@@ -13,9 +13,14 @@ enum Main {
             let b = args.firstIndex(of: "--brief").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
             DevModes.advisor(jsonl: args[i + 1], brief: b)
         } else if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
-            DevModes.render(out: args[i + 1], dark: args.contains("--dark"), idle: args.contains("--idle"))
+            let route = args.firstIndex(of: "--route").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+            DevModes.render(out: args[i + 1], dark: args.contains("--dark"), route: route ?? (args.contains("--idle") ? "prep" : "live"))
         } else if let i = args.firstIndex(of: "--filetest"), i + 2 < args.count {
             FileTest.run(remotePath: args[i + 1], localPath: args[i + 2])
+        } else if let i = args.firstIndex(of: "--buildbrief"), i + 2 < args.count {
+            DevModes.buildBrief(folder: args[i + 1], description: args[i + 2], out: args.firstIndex(of: "--out").map { args[$0 + 1] })
+        } else if let i = args.firstIndex(of: "--summarize"), i + 1 < args.count {
+            DevModes.summarize(sessionDir: args[i + 1])
         } else if let i = args.firstIndex(of: "--selftest") {
             let secs = (i + 1 < args.count ? Double(args[i + 1]) : nil) ?? 30
             SelfTest.run(seconds: secs)
@@ -55,7 +60,7 @@ enum SelfTest {
                 log("model install failed: \(error)"); exit(2)
             }
             let rec = Recorder()
-            rec.onFinal = { u in log("FINAL \(u.ch.label): \(u.text)") }
+            rec.onFinal = { u in log("FINAL \(u.ch.label) \(u.spk ?? "?"): \(u.text)") }
             rec.onError = { msg in log("ERROR \(msg)") }
             do {
                 let store = try await rec.start(locale: locale)
@@ -158,6 +163,47 @@ enum FileTest {
 }
 
 enum DevModes {
+    /// Headless brief build: `--buildbrief <folder|-> "<description>" [--out path]`. Streams steps to stderr.
+    static func buildBrief(folder: String, description: String, out: String?) {
+        Task {
+            var info = MeetingInfo()
+            info.title = "Test meeting"
+            info.description = description
+            if folder != "-" { info.materials = [folder] }
+            let t0 = Date()
+            do {
+                let brief = try await BriefBuilder().build(info) { e in
+                    switch e {
+                    case .step(let s): FileHandle.standardError.write(Data("  → \(s)\n".utf8))
+                    case .thinking(let s): FileHandle.standardError.write(Data("  · \(s)\n".utf8))
+                    }
+                }
+                if let out { try brief.write(toFile: out, atomically: true, encoding: .utf8) } else { print(brief) }
+                FileHandle.standardError.write(Data(String(format: "done in %.0fs, %d chars\n", Date().timeIntervalSince(t0), brief.count).utf8))
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("failed: \(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
+        }
+        dispatchMain()
+    }
+
+    /// Headless summary of an existing session directory; prints it (does not write summary.md).
+    static func summarize(sessionDir: String) {
+        Task {
+            let files = SessionFiles(dir: URL(fileURLWithPath: sessionDir))
+            do {
+                print(try await Summarizer.summarize(files: files, briefURL: files.meeting?.brief.map { URL(fileURLWithPath: $0) }))
+                exit(0)
+            } catch {
+                FileHandle.standardError.write(Data("failed: \(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
+        }
+        dispatchMain()
+    }
+
     /// Replays a transcript.jsonl as if it were the last few minutes and runs one advisor cycle.
     static func advisor(jsonl: String, brief: String? = nil) {
         Task {
@@ -189,24 +235,50 @@ enum DevModes {
     }
 
     /// Renders the main window offscreen with sample data to a PNG.
-    @MainActor static func render(out: String, dark: Bool, idle: Bool = false) {
+    /// `--render out.png [--dark] [--route prep|build|live|brief|session]`. brief/session use the newest real one.
+    @MainActor static func render(out: String, dark: Bool, route: String) {
         guard #available(macOS 26.0, *) else { exit(1) }
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         app.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let m = AppModel.shared
         let now = Date()
-        m.phase = idle ? .idle : .recording
+        let live = route == "live"
+        m.phase = live ? .recording : .idle
         m.startedAt = now.addingTimeInterval(-1934)
+        m.meeting.title = "Reporting scope review"
+        m.speakerNames = ["R1": "Dana (client)"]
+        m.highlights = [Highlight(t: now.addingTimeInterval(-45), note: "Export ask — follow up")]
+        switch route {
+        case "prep":
+            m.route = .prep
+            m.draft = MeetingInfo(title: "Reporting scope review",
+                                  description: "Monthly check-in with the client's finance lead. They'll push to add a finance-system export to the reporting module; it isn't in the SOW.",
+                                  attendees: "Dana (finance lead), Sam (ops)", materials: [NSHomeDirectory() + "/Documents"])
+        case "build":
+            m.route = .prep
+            var job = AppModel.BuildJob(target: nil, refining: false)
+            job.started = now.addingTimeInterval(-74)
+            job.steps = ["· I'll start by listing the materials.", "Listing **/*", "Reading SOW-4.pdf", "Reading notes/2026-09-10.md",
+                         "Searching for “export”", "Running git log --oneline -20", "· The SOW excludes integrations; checking the change log.", "Reading CHANGELOG.md"]
+            m.job = job
+        case "brief":
+            if let b = m.briefs.first { m.route = .brief(b) }
+        case "session":
+            if let s = m.sessions.first { m.route = .session(s.dir) }
+        default:
+            m.route = .live
+        }
         m.advisorStatus = "Last check 10:32:14 — 3 new"
         // Invented sample data for UI renders — keep real meeting content out of the repo.
         m.utterances = [
+            Utterance(t: now.addingTimeInterval(-70), ch: .remote, text: "Thanks for making time. Sam's joining from the ops side.", spk: "R1"),
             Utterance(t: now.addingTimeInterval(-60), ch: .remote, text: "We'd also like the dashboard to export straight into our finance system every week.", spk: "R1"),
             Utterance(t: now.addingTimeInterval(-52), ch: .remote, text: "Can you just add that to the reporting module?", spk: "R2"),
             Utterance(t: now.addingTimeInterval(-40), ch: .local, text: "Yeah, I think we can probably fold that into the reporting work.", spk: "L1"),
             Utterance(t: now.addingTimeInterval(-20), ch: .remote, text: "Great. And the weekend team needs its own approval flow too.", spk: "R1"),
         ]
-        m.volatile = [.local: "Let me make sure I understand the timing"]
+        if live { m.volatile = [.local: "Let me make sure I understand the timing"] }
         let a = [
             Suggestion(at: now, kind: .flag, text: "You just accepted a finance-system export. That's outside the agreed scope — name a change request: \"That's a real need; let me scope it and come back with hours and cost.\""),
             Suggestion(at: now, kind: .ask, text: "Does the finance system need a file drop, or a direct integration with an API?"),

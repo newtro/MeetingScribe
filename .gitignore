@@ -1,0 +1,11 @@
+# Build output — also holds test-sessions/ with real recorded conversation. Never commit.
+build/
+
+# Runtime data lives in ~/Documents/MeetingScribe, not here; guard against copies anyway.
+sessions/
+contexts/
+context.md
+*.log
+
+.DS_Store
+*.swp

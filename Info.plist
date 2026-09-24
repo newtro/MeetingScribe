@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>com.trellispoint.meetingscribe</string>
+    <key>CFBundleName</key><string>MeetingScribe</string>
+    <key>CFBundleDisplayName</key><string>MeetingScribe</string>
+    <key>CFBundleExecutable</key><string>MeetingScribe</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+    <key>LSMinimumSystemVersion</key><string>26.0</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSPrincipalClass</key><string>NSApplication</string>
+    <key>NSMicrophoneUsageDescription</key><string>MeetingScribe transcribes your side of the meeting on-device. Audio never leaves this Mac.</string>
+    <key>NSSpeechRecognitionUsageDescription</key><string>MeetingScribe transcribes the meeting on-device. Audio never leaves this Mac.</string>
+    <key>NSScreenCaptureUsageDescription</key><string>MeetingScribe captures meeting audio (not video) through ScreenCaptureKit and transcribes it on-device.</string>
+</dict>
+</plist>

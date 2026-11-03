@@ -65,6 +65,7 @@ final class AppModel: ObservableObject {
     @Published var advisorBusy = false
     @Published var advisorStatus = "Advisor idle"
     @Published var blocker: Blocker?
+    @Published private(set) var capturePermissions = CapturePermissions.current
     @Published var errorText: String?
     @Published var sessionDir: URL?
     @Published var meeting = MeetingInfo()
@@ -297,6 +298,14 @@ final class AppModel: ObservableObject {
         Task { await start() }
     }
 
+    func refreshCapturePermissions() {
+        capturePermissions = .current
+        if (blocker == .microphone && capturePermissions.microphone == .authorized)
+            || (blocker == .screenRecording && capturePermissions.screenAudioGranted) {
+            blocker = nil
+        }
+    }
+
     func start() async {
         guard phase == .idle, !terminating else { return }
         guard !AppUpdater.shared.installationInProgress else {
@@ -326,7 +335,9 @@ final class AppModel: ObservableObject {
             self.modelStatus = "\(channel.label): \(status)"
         } }
 
-        if !(await AVCaptureDevice.requestAccess(for: .audio)) {
+        let microphoneGranted = await CapturePermissions.requestMicrophoneIfNeeded()
+        refreshCapturePermissions()
+        if !microphoneGranted {
             blocker = .microphone
             recordingID = nil
             phase = .idle
@@ -390,9 +401,10 @@ final class AppModel: ObservableObject {
             recordingID = nil
             phase = .idle
             let ns = error as NSError
-            if ns.domain == SCStreamErrorDomain && ns.code == SCStreamError.userDeclined.rawValue {
+            refreshCapturePermissions()
+            if ns.domain == SCStreamErrorDomain && ns.code == SCStreamError.userDeclined.rawValue
+                && !capturePermissions.screenAudioGranted {
                 blocker = .screenRecording
-                CGRequestScreenCaptureAccess()
             } else {
                 errorText = "Could not start: \(error.localizedDescription)"
             }

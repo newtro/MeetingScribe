@@ -105,6 +105,7 @@ finish)
     APP="$NOTARIZED_ATTEMPT/MeetingScribe.app"
   fi
   codesign --verify --deep --strict "$APP"
+  python3 "$SRC/scripts/verify-audio-input.py" "$APP"
   SIGNING_INFO="$(codesign -dvv "$APP" 2>&1)"
   [[ "$SIGNING_INFO" == *'Authority=Developer ID Application:'* && "$SIGNING_INFO" == *'TeamIdentifier=232A77467G'* && "$SIGNING_INFO" == *'(runtime)'* ]] || die 'Expected hardened Developer ID release signing identity.'
   [[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Contents/Info.plist")" == "$VERSION" ]] || die 'Notarized app marketing version differs from pinned release.'

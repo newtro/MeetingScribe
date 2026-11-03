@@ -5,6 +5,7 @@ set -euo pipefail
 APP="${1:?usage: developer-id.sh <app> <work directory> [export|upload]}"
 WORK="${2:?usage: developer-id.sh <app> <work directory> [export|upload]}"
 DEST="${3:-export}"
+SCRIPT_DIR="${0:A:h}"
 [[ "$DEST" == export || "$DEST" == upload ]] || { print -u2 'Destination must be export or upload.'; exit 2; }
 APP="${APP:A}"; WORK="${WORK:A}"
 [[ -f "$APP/Contents/Info.plist" ]] || { print -u2 'App bundle is missing.'; exit 1; }
@@ -60,7 +61,7 @@ if [[ ! -f "$WORK/archive-hardened" ]]; then
   DEVELOPMENT_ID="${MEETINGSCRIBE_DEVELOPMENT_SIGN_ID:-Apple Development: scott@johnnycode.ai (52XDFWFDBZ)}"
   # A self-signed hardened app cannot load Sparkle under library validation. Give every nested
   # code object the same Apple Development team before Xcode's cloud Developer ID export.
-  python3 - "$ARCHIVE/Products/Applications/MeetingScribe.app" "$DEVELOPMENT_ID" <<'PY'
+  python3 - "$ARCHIVE/Products/Applications/MeetingScribe.app" "$DEVELOPMENT_ID" "$SCRIPT_DIR/../MeetingScribe.entitlements" <<'PY'
 import pathlib, subprocess, sys
 root = pathlib.Path(sys.argv[1]); identity = sys.argv[2]
 magic = {bytes.fromhex(h) for h in ['feedface', 'feedfacf', 'cefaedfe', 'cffaedfe', 'cafebabe', 'bebafeca', 'cafebabf', 'bfbafeca']}
@@ -72,12 +73,14 @@ for path in root.rglob('*'):
             if f.read(4) in magic: binaries.append(path)
     elif path.suffix in {'.app', '.xpc', '.framework'}: bundles.append(path)
 for path in sorted(binaries, key=lambda p: len(p.parts), reverse=True) + sorted(bundles, key=lambda p: len(p.parts), reverse=True) + [root]:
+    entitlements = ['--entitlements', sys.argv[3]] if path == root else ['--preserve-metadata=entitlements']
     subprocess.run(['codesign', '--force', '--options', 'runtime', '--sign', identity,
-                    '--preserve-metadata=entitlements', str(path)], check=True)
+                    *entitlements, str(path)], check=True)
 subprocess.run(['codesign', '--verify', '--deep', '--strict', str(root)], check=True)
 PY
   touch "$WORK/archive-hardened"
 fi
+python3 "$SCRIPT_DIR/verify-audio-input.py" "$ARCHIVE/Products/Applications/MeetingScribe.app"
 python3 - "$WORK/ExportOptions-$DEST.plist" "$DEST" <<'PY'
 import pathlib, plistlib, sys
 pathlib.Path(sys.argv[1]).write_bytes(plistlib.dumps({'method': 'developer-id', 'destination': sys.argv[2],
@@ -93,6 +96,7 @@ if ! xcodebuild -exportArchive -archivePath "$ARCHIVE" -exportPath "$OUTPUT" \
 fi
 if [[ "$DEST" == export ]]; then
   codesign --verify --deep --strict "$OUTPUT/MeetingScribe.app"
+  python3 "$SCRIPT_DIR/verify-audio-input.py" "$OUTPUT/MeetingScribe.app"
   SIGNING_INFO="$(codesign -dvv "$OUTPUT/MeetingScribe.app" 2>&1)"
   [[ "$SIGNING_INFO" == *'Authority=Developer ID Application:'* && "$SIGNING_INFO" == *'TeamIdentifier=232A77467G'* && "$SIGNING_INFO" == *'(runtime)'* ]] || {
     print -u2 'Export did not have the expected hardened Developer ID identity.'; exit 1;

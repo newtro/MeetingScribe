@@ -131,7 +131,8 @@ struct ProjectPreparationView: View {
                     Label(m.modelStatus, systemImage: m.modelReady ? "waveform" : "hourglass").font(.callout)
                     Label(m.diarizationStatus, systemImage: m.diarizationReady ? "person.wave.2" : "person.crop.circle.badge.exclamationmark")
                         .font(.callout).foregroundStyle(m.diarizationReady ? Color.secondary : .orange)
-                    Label(AudioCapture.hasScreenRecordingPermission ? "Screen audio permission granted" : "Screen audio permission needed on first start", systemImage: "speaker.wave.2").font(.callout)
+                    Label(m.capturePermissions.microphoneLabel, systemImage: "mic").font(.callout)
+                    Label(m.capturePermissions.screenAudioLabel, systemImage: "speaker.wave.2").font(.callout)
                     if let error = prep.error { Text(error).foregroundStyle(.orange).textSelection(.enabled) }
                     if prep.isPreparing { Text("You can start recording while context is preparing. Live advice gains the new brief when it is ready.").font(.caption).foregroundStyle(.secondary) }
                 }.padding(18).frame(maxWidth: .infinity, alignment: .leading)

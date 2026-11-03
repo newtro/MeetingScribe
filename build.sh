@@ -64,8 +64,9 @@ for xpc in "$SPARKLE"/XPCServices/*.xpc; do sign "$xpc"; done
 sign "$SPARKLE/Autoupdate"
 sign "$SPARKLE/Updater.app"
 sign "$APP/Contents/Frameworks/Sparkle.framework"
-sign "$APP"
+sign --entitlements MeetingScribe.entitlements "$APP"
 codesign --verify --verbose "$APP"
+python3 scripts/verify-audio-input.py "$APP"
 if [[ "${1:-}" == "--install" ]]; then
   if pgrep -x MeetingScribe >/dev/null; then
     echo "Quit MeetingScribe normally before installing; recording must finish and flush first." >&2
@@ -80,6 +81,7 @@ if [[ "${1:-}" == "--install" ]]; then
   mkdir -p ~/Applications
   rm -rf ~/Applications/MeetingScribe.app /Applications/MeetingScribe.app
   cp -R "$APP" /Applications/
+  python3 scripts/verify-audio-input.py /Applications/MeetingScribe.app
   # Register with Launch Services and Spotlight so it shows up in Spotlight / Apps.
   /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/MeetingScribe.app
   mdimport /Applications/MeetingScribe.app

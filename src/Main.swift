@@ -13,14 +13,17 @@ enum Main {
         if args.contains("--capturepermissions") {
             // A read-only bundle-attributed TCC check for release/signing verification. Never prompts or captures.
             NSApplication.shared.setActivationPolicy(.prohibited)
-            let report: [String: Any] = ["screenAudioGranted": CGPreflightScreenCaptureAccess(),
-                "microphoneAuthorization": AVCaptureDevice.authorizationStatus(for: .audio).rawValue,
-                "bundleIdentifier": Bundle.main.bundleIdentifier ?? "unknown"]
-            do {
-                let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
-                if let output { try data.write(to: URL(fileURLWithPath: output), options: .atomic) }
-                else { FileHandle.standardOutput.write(data) }
-            } catch { fputs("Permission check: \(error.localizedDescription)\n", stderr); exit(1) }
+            writePermissionReport(to: output)
+        } else if args.contains("--requestcapturepermissions") {
+            // Run only the standard macOS permission flow. No audio capture or session is started.
+            NSApplication.shared.setActivationPolicy(.accessory)
+            Task { @MainActor in
+                _ = await CapturePermissions.requestMicrophoneIfNeeded()
+                if !AudioCapture.hasScreenRecordingPermission { _ = CGRequestScreenCaptureAccess() }
+                writePermissionReport(to: output)
+                exit(0)
+            }
+            NSApplication.shared.run()
         } else if args.contains("--workflowtest") {
             WorkflowTests.run(out: output)
         } else if let i = args.firstIndex(of: "--projectcheck"), i + 1 < args.count {
@@ -43,6 +46,18 @@ enum Main {
         } else {
             MeetingScribeApp.main()
         }
+    }
+
+    private static func writePermissionReport(to output: String?) {
+        let permissions = CapturePermissions.current
+        let report: [String: Any] = ["screenAudioGranted": permissions.screenAudioGranted,
+            "microphoneAuthorization": permissions.microphone.rawValue,
+            "bundleIdentifier": Bundle.main.bundleIdentifier ?? "unknown"]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+            if let output { try data.write(to: URL(fileURLWithPath: output), options: .atomic) }
+            else { FileHandle.standardOutput.write(data) }
+        } catch { fputs("Permission check: \(error.localizedDescription)\n", stderr); exit(1) }
     }
 }
 
@@ -67,7 +82,7 @@ enum SelfTest {
             log("selftest start, \(seconds)s")
             log("screen recording preflight: \(AudioCapture.hasScreenRecordingPermission)")
             if !AudioCapture.hasScreenRecordingPermission { log("requesting: \(CGRequestScreenCaptureAccess())") }
-            let mic = await AVCaptureDevice.requestAccess(for: .audio)
+            let mic = await CapturePermissions.requestMicrophoneIfNeeded()
             log("microphone access: \(mic)")
             let locale = await SpeechModel.locale()
             do {

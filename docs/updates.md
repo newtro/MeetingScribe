@@ -10,6 +10,8 @@ The first updater release is **1.1.1**. Marketing versions use `major.minor.patc
 
 Normal developer builds retain the stable **ImageSmith Dev** signature. Do not use ad-hoc signing. Production releases use **Developer ID Application, team 232A77467G**, hardened runtime, Apple notarization and a stapled ticket. Moving an existing ImageSmith Dev installation to Developer ID is a one-time signing-identity transition: check Screen Recording and microphone access on the installed release and, if macOS requests it, regrant access. Subsequent updates preserve the Developer ID identity. Never silently fall back to the development identity when updating an installed Developer ID app.
 
+From 1.1.2, the main app carries Apple’s Audio Input entitlement (`com.apple.security.device.audio-input`). Hardened releases need it in addition to the user’s microphone grant. Release verification checks the signed app after export and notarization.
+
 The cloud-signing helper requires the authorized Apple account in Xcode Settings → Accounts. It makes an archive copy, signs all nested code inside-out with the existing Apple Development identity and hardened runtime, then asks Xcode to export through its cloud-managed Developer ID certificate. This avoids a self-signed hardened executable trying to load an Apple-team Sparkle framework. Library validation stays enabled. The source build is unchanged; no certificate or private key is exported.
 
 ## Resumable release commands

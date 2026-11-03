@@ -11,7 +11,7 @@ struct RootView: View {
                 .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
         } detail: {
             VStack(spacing: 0) {
-                if let b = m.blocker { PermissionBanner(blocker: b) }
+                if let b = m.blocker { PermissionBanner(blocker: b, permissions: m.capturePermissions) }
                 if let e = m.errorText { ErrorBanner(text: e) { m.errorText = nil } }
                 if let e = m.persistenceError { Text(e).font(.headline).foregroundStyle(.white).padding(12).frame(maxWidth: .infinity).background(.red) }
                 detail
@@ -19,6 +19,7 @@ struct RootView: View {
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            m.refreshCapturePermissions()
             if !m.isRecording { m.reloadBriefs() }
             m.reloadSessions()
             m.reloadProjects()
@@ -149,6 +150,7 @@ struct ErrorBanner: View {
 @available(macOS 26.0, *)
 struct PermissionBanner: View {
     let blocker: AppModel.Blocker
+    let permissions: CapturePermissions
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: "exclamationmark.lock.fill").font(.largeTitle)
@@ -157,10 +159,16 @@ struct PermissionBanner: View {
                     Text("Screen & System Audio Recording permission is needed").font(.title3.bold())
                     Text("MeetingScribe captures call audio through ScreenCaptureKit. Open System Settings › Privacy & Security › Screen & System Audio Recording, turn on MeetingScribe, then quit and reopen MeetingScribe.")
                     Button("Open Screen & System Audio Recording settings") { AppModel.openScreenRecordingSettings() }
-                } else {
+                } else if permissions.microphone == .restricted {
+                    Text("Microphone access is restricted").font(.title3.bold())
+                    Text("macOS policy prevents MeetingScribe from using the microphone. Ask your Mac administrator about microphone access.")
+                } else if permissions.microphone == .denied {
                     Text("Microphone permission is needed").font(.title3.bold())
                     Text("Open System Settings › Privacy & Security › Microphone and turn on MeetingScribe, then press Start again.")
                     Button("Open Microphone settings") { AppModel.openMicrophoneSettings() }
+                } else {
+                    Text("Microphone access is unavailable").font(.title3.bold())
+                    Text("macOS did not authorize microphone access for this copy of MeetingScribe. Quit and reopen the installed app, then try Start again.")
                 }
             }
             Spacer()

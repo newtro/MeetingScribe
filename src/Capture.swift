@@ -4,6 +4,40 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
+struct CapturePermissions: Equatable {
+    let microphone: AVAuthorizationStatus
+    let screenAudioGranted: Bool
+
+    static var current: Self {
+        Self(microphone: AVCaptureDevice.authorizationStatus(for: .audio),
+             screenAudioGranted: CGPreflightScreenCaptureAccess())
+    }
+
+    static func requestMicrophoneIfNeeded() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: return true
+        case .notDetermined: return await AVCaptureDevice.requestAccess(for: .audio)
+        case .denied, .restricted: return false
+        @unknown default: return false
+        }
+    }
+
+    var microphoneLabel: String {
+        switch microphone {
+        case .authorized: return "Microphone access granted"
+        case .notDetermined: return "Microphone access not yet requested"
+        case .denied: return "Microphone access denied"
+        case .restricted: return "Microphone access restricted by macOS"
+        @unknown default: return "Microphone access unavailable"
+        }
+    }
+
+    var screenAudioLabel: String {
+        screenAudioGranted ? "Screen & System Audio Recording access granted"
+                           : "Screen & System Audio Recording access needed"
+    }
+}
+
 /// One SCStream, two audio outputs: `.audio` = REMOTE (what the machine plays, i.e. the call),
 /// `.microphone` = LOCAL (Scott).
 final class AudioCapture: NSObject, SCStreamOutput, SCStreamDelegate, @unchecked Sendable {

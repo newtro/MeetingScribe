@@ -43,10 +43,9 @@ struct ReadinessSnapshot: Codable, Sendable {
         snapshot = ReadinessSnapshot(generationID: generationID)
         do { try store.checkWritable(); snapshot.set(.storage, state: .ready, detail: "Application data directory is writable.") }
         catch { snapshot.set(.storage, state: .blocked, detail: error.localizedDescription) }
-        let screen = CGPreflightScreenCaptureAccess()
-        let microphone = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-        snapshot.set(.capturePermission, state: screen && microphone ? .ready : .blocked,
-                     detail: screen && microphone ? "Microphone and screen/audio permissions granted." : "Microphone and screen/audio permissions must be granted before recording.")
+        let permissions = CapturePermissions.current
+        snapshot.set(.capturePermission, state: permissions.screenAudioGranted && permissions.microphone == .authorized ? .ready : .blocked,
+                     detail: permissions.microphoneLabel + ". " + permissions.screenAudioLabel + ".")
         snapshot.set(.provider, state: FileManager.default.isExecutableFile(atPath: ClaudeCLI.path) ? .checking : .blocked,
                      detail: "Provider readiness requires a successful model request; executable presence alone is insufficient.")
         snapshot.set(.context, state: .checking, detail: "Refreshing project context.")

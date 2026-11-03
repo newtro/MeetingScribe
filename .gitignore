@@ -12,3 +12,6 @@ context.md
 
 # SwiftPM
 .build/
+
+# Local Python release/test helpers
+__pycache__/

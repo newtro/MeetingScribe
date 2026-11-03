@@ -10,7 +10,18 @@ enum Main {
     static func main() {
         let args = CommandLine.arguments
         let output = args.firstIndex(of: "--out").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
-        if args.contains("--workflowtest") {
+        if args.contains("--capturepermissions") {
+            // A read-only bundle-attributed TCC check for release/signing verification. Never prompts or captures.
+            NSApplication.shared.setActivationPolicy(.prohibited)
+            let report: [String: Any] = ["screenAudioGranted": CGPreflightScreenCaptureAccess(),
+                "microphoneAuthorization": AVCaptureDevice.authorizationStatus(for: .audio).rawValue,
+                "bundleIdentifier": Bundle.main.bundleIdentifier ?? "unknown"]
+            do {
+                let data = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+                if let output { try data.write(to: URL(fileURLWithPath: output), options: .atomic) }
+                else { FileHandle.standardOutput.write(data) }
+            } catch { fputs("Permission check: \(error.localizedDescription)\n", stderr); exit(1) }
+        } else if args.contains("--workflowtest") {
             WorkflowTests.run(out: output)
         } else if let i = args.firstIndex(of: "--projectcheck"), i + 1 < args.count {
             WorkflowTests.prepareProject(folder: args[i + 1], out: output)

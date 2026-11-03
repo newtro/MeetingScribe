@@ -291,6 +291,10 @@ final class AppModel: ObservableObject {
 
     func start() async {
         guard phase == .idle, !terminating else { return }
+        guard !AppUpdater.shared.installationInProgress else {
+            errorText = "An application update is finishing. Start your meeting after the app reopens."
+            return
+        }
         phase = .starting
         let token = UUID()
         recordingID = token
@@ -594,6 +598,11 @@ final class AppModel: ObservableObject {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var terminationPending = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        AppUpdater.shared.start(model: AppModel.shared)
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -643,6 +652,7 @@ struct MeetingCommands: Commands {
     @ObservedObject var m: AppModel
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) { CheckForUpdatesButton() }
         CommandGroup(replacing: .newItem) {
             Button("Projects") { m.route = .projects }
                 .keyboardShortcut("n")

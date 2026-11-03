@@ -24,10 +24,12 @@ enum WorkflowTests {
                 catch { failures.append("Project workflow: \(error.localizedDescription)") }
                 do { _ = try await PrompterWorkflowTests.run() }
                 catch { failures.append("Native prompter: \(error.localizedDescription)") }
+                do { _ = try UpdaterWorkflowTests.run() }
+                catch { failures.append("Updater policy: \(error.localizedDescription)") }
                 do { try contractCheck() }
                 catch { failures.append("Archive contract: \(error.localizedDescription)") }
                 let report: [String: Any] = ["passed": failures.isEmpty, "failures": failures,
-                    "suites": ["speech timeline / revision / echo / flush", "advisor queue / provenance / cancellation", "project scopes / Git / preparation races", "archive format / legacy metadata", "native prompter anchor / takeover / resume"],
+                    "suites": ["speech timeline / revision / echo / flush", "advisor queue / provenance / cancellation", "project scopes / Git / preparation races", "archive format / legacy metadata", "native prompter anchor / takeover / resume", "updater activity gate / delegate selectors"],
                     "providerCalls": 0, "captureStarted": false]
                 let url = directory.appendingPathComponent("report.json")
                 try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url)

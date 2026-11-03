@@ -181,6 +181,7 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            UpdateSettingsView()
             Section("You") {
                 TextField("Your name", text: $userName, prompt: Text(Prefs.user))
                 Text("Used in briefs and summaries. Microphone channel does not establish a speaker’s identity.")

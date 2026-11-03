@@ -2,6 +2,7 @@ import AppKit
 import AVFoundation
 import ScreenCaptureKit
 import SwiftUI
+import Combine
 
 // MARK: - Model
 
@@ -12,7 +13,7 @@ final class AppModel: ObservableObject {
 
     enum Phase { case idle, starting, recording, stopping }
     enum Blocker: Equatable { case screenRecording, microphone }
-    enum Route: Hashable { case prep, live, brief(URL), session(URL) }
+    enum Route: Hashable { case projects, project(UUID), prep, live, brief(URL), session(URL) }
 
     /// A brief being written or revised by Claude.
     struct BuildJob: Equatable {
@@ -25,11 +26,29 @@ final class AppModel: ObservableObject {
     }
 
     // Navigation
-    @Published var route: Route = .prep
+    @Published var route: Route = .projects
     @Published var sessions: [SessionInfo] = []
+    @Published var projects: [ProjectProfile] = []
+    @Published var selectedProjectID: UUID?
+    @Published var persistenceError: String?
+    let projectStore = ProjectStore()
+    let preparation = ProjectPreparation()
+    let live = LiveMeetingCoordinator()
+    private var observers = Set<AnyCancellable>()
+    private var recordingID: UUID?
+    private var startingCapture = false
+    private var terminating = false
+    private var lifecycleWaiters: [CheckedContinuation<Void, Never>] = []
 
     // Recording
-    @Published var phase: Phase = .idle
+    @Published var phase: Phase = .idle {
+        didSet {
+            guard phase != .starting, phase != .stopping else { return }
+            let waiters = lifecycleWaiters
+            lifecycleWaiters.removeAll()
+            waiters.forEach { $0.resume() }
+        }
+    }
     @Published var startedAt: Date?
     @Published var utterances: [Utterance] = []
     @Published var volatile: [Channel: String] = [:]
@@ -38,6 +57,11 @@ final class AppModel: ObservableObject {
     @Published var modelStatus = "Checking speech model…"
     @Published var modelProgress: Double?
     @Published var modelReady = false
+    @Published var diarizationReady = false
+    @Published var diarizationStatus = "Speaker model not prepared"
+    private var preparingSpeech = false
+    private(set) var preparedSpeechEngine: SpeechEngine?
+    private var speechPreparationID: UUID?
     @Published var advisorBusy = false
     @Published var advisorStatus = "Advisor idle"
     @Published var blocker: Blocker?
@@ -78,6 +102,11 @@ final class AppModel: ObservableObject {
         Task { await prepareModel() }
         reloadBriefs()
         reloadSessions()
+        reloadProjects()
+        preparation.objectWillChange.sink { [weak self] in
+            DispatchQueue.main.async { self?.preparationChanged() }
+        }.store(in: &observers)
+        live.objectWillChange.sink { [weak self] in self?.objectWillChange.send() }.store(in: &observers)
     }
 
     // MARK: Library
@@ -102,19 +131,66 @@ final class AppModel: ObservableObject {
 
     // MARK: Speech model
 
-    func prepareModel() async {
-        let loc = await SpeechModel.locale()
-        locale = loc
-        do {
-            try await SpeechModel.ensureInstalled(locale: loc) { p, msg in
-                Task { @MainActor in
-                    AppModel.shared.modelProgress = p < 1 ? p : nil
-                    AppModel.shared.modelStatus = msg
+    func speechEngineChanged() {
+        modelReady = false
+        preparedSpeechEngine = nil
+        locale = nil
+        guard phase == .idle || (phase == .starting && !startingCapture) else { return }
+        modelStatus = "Preparing selected speech engine…"
+        Task { await prepareModel(allowStarting: true) }
+    }
+
+    func prepareModel(allowStarting: Bool = false) async {
+        guard !terminating, !startingCapture, phase == .idle || (allowStarting && phase == .starting) else { return }
+        while preparingSpeech {
+            do { try await Task.sleep(for: .milliseconds(50)) }
+            catch { return }
+        }
+        guard !terminating, !startingCapture, !Task.isCancelled, phase == .idle || (allowStarting && phase == .starting) else { return }
+        if modelReady, preparedSpeechEngine == SpeechEngine.selected { return }
+        preparingSpeech = true
+        defer { preparingSpeech = false; speechPreparationID = nil; modelProgress = nil }
+        while !terminating, !Task.isCancelled, phase == .idle || phase == .starting {
+            let requested = SpeechEngine.selected
+            let generation = UUID()
+            speechPreparationID = generation
+            modelReady = false
+            preparedSpeechEngine = nil
+            locale = nil
+            let loc = await SpeechModel.locale()
+            guard !terminating, !Task.isCancelled else { return }
+            if requested != SpeechEngine.selected { continue }
+            do {
+                let readiness = try await SpeechModel.prepare(locale: loc) { [weak self] p, msg in
+                    Task { @MainActor in
+                        guard let self, self.speechPreparationID == generation,
+                              requested == SpeechEngine.selected else { return }
+                        self.modelProgress = p < 1 ? p : nil
+                        self.modelStatus = msg
+                    }
                 }
+                guard !terminating, !Task.isCancelled else { return }
+                if requested != SpeechEngine.selected || readiness.requested != requested { continue }
+                modelStatus = readiness.message
+                do {
+                    try await DiarizationEngine.shared.prepare()
+                    diarizationReady = true
+                    diarizationStatus = "Nemotron 3 speaker labels ready"
+                } catch {
+                    diarizationReady = false
+                    diarizationStatus = "Speaker labels unavailable: \(error.localizedDescription)"
+                }
+                guard !terminating, !Task.isCancelled else { return }
+                if requested != SpeechEngine.selected { continue }
+                locale = loc
+                preparedSpeechEngine = requested
+                modelReady = readiness.ready
+                return
+            } catch {
+                if requested != SpeechEngine.selected { continue }
+                modelStatus = "Speech model preparation failed: \(error.localizedDescription)"
+                return
             }
-            modelReady = true
-        } catch {
-            modelStatus = "Speech model install failed: \(error.localizedDescription)"
         }
     }
 
@@ -202,6 +278,9 @@ final class AppModel: ObservableObject {
     /// Starts with the given brief (or the selected one). Meeting details come from the brief's metadata when it
     /// was built here, else from the New Meeting form.
     func startMeeting(with briefURL: URL? = nil) {
+        guard phase == .idle, !terminating else { return }
+        if briefURL == nil, selectedProjectID != nil { startProjectMeeting(); return }
+        selectedProjectID = nil
         if let briefURL { brief = briefURL }
         let typed = !draft.title.trimmingCharacters(in: .whitespaces).isEmpty || !draft.description.isEmpty
         var info = typed ? draft : ((hasBrief ? meta(forBrief: brief) : nil) ?? draft)
@@ -211,21 +290,49 @@ final class AppModel: ObservableObject {
     }
 
     func start() async {
-        guard phase == .idle else { return }
+        guard phase == .idle, !terminating else { return }
         phase = .starting
+        let token = UUID()
+        recordingID = token
         errorText = nil
+        persistenceError = nil
         blocker = nil
+        recorder.onFinal = { [weak self] u in Task { @MainActor in
+            guard let self, self.recordingID == token else { return }
+            self.utterances.append(u)
+        } }
+        recorder.onVolatile = { [weak self] ch, text in Task { @MainActor in
+            guard let self, self.recordingID == token else { return }
+            self.volatile[ch] = text
+        } }
+        recorder.onSpeechEvent = { [weak self] event in Task { @MainActor in
+            guard let self, self.recordingID == token, self.selectedProjectID != nil else { return }
+            self.live.ingest(event)
+        } }
+        recorder.onSpeechStatus = { [weak self] channel, _, status in Task { @MainActor in
+            guard let self, self.recordingID == token else { return }
+            self.modelStatus = "\(channel.label): \(status)"
+        } }
 
         if !(await AVCaptureDevice.requestAccess(for: .audio)) {
             blocker = .microphone
+            recordingID = nil
             phase = .idle
             return
         }
-        if !modelReady { await prepareModel() }
-        guard modelReady, let locale else { phase = .idle; return }
+        guard !terminating else { recordingID = nil; phase = .idle; return }
+        if !modelReady || preparedSpeechEngine != SpeechEngine.selected { await prepareModel(allowStarting: true) }
+        guard !terminating, modelReady, preparedSpeechEngine == SpeechEngine.selected,
+              let locale else { recordingID = nil; phase = .idle; return }
 
         do {
+            startingCapture = true
             let store = try await recorder.start(locale: locale)
+            startingCapture = false
+            store.onWriteError = { [weak self] message in Task { @MainActor in
+                guard let self, self.recordingID == token else { return }
+                self.persistenceError = message
+            } }
             utterances = []
             volatile = [:]
             suggestions = []
@@ -237,7 +344,12 @@ final class AppModel: ObservableObject {
             sessionDir = store.dir
             startedAt = store.start
             if meeting.title.isEmpty { meeting.title = hasBrief ? Paths.briefName(brief) : "Meeting" }
-            meeting.brief = hasBrief ? brief.path : nil
+            // Preparation may have completed while capture was starting. Pin one snapshot for both
+            // the session metadata and live advice, with no await between these assignments.
+            let packet = currentProjectPacket
+            meeting.projectID = selectedProjectID
+            meeting.preparedPacketID = packet?.id
+            meeting.brief = selectedProjectID == nil ? (hasBrief ? brief.path : nil) : packet.map { projectStore.briefURL(projectID: $0.projectID, packetID: $0.id).path }
             meeting.started = store.start
             meeting.ended = nil
             SessionFiles(dir: store.dir).save(meeting: meeting)
@@ -246,10 +358,24 @@ final class AppModel: ObservableObject {
             activity = ProcessInfo.processInfo.beginActivity(
                 options: [.userInitiated, .idleSystemSleepDisabled], reason: "Recording meeting")
             NSApp.dockTile.badgeLabel = "REC"
-            advisorStatus = hasBrief ? "First check in \(Int(advisorInterval))s" : "No brief — advisor off"
-            startAdvisorLoop()
+            if selectedProjectID != nil {
+                live.onCue = { [weak self, weak store] cue in
+                    guard let self, self.recordingID == token, self.isRecording else { return }
+                    let suggestion = cue.suggestion
+                    self.suggestions.insert(suggestion, at: 0)
+                    self.latestBatch = [suggestion.id]
+                    store?.appendSuggestions(Advisor.markdown([suggestion]))
+                }
+                live.start(sessionID: token, sessionDir: store.dir, packet: packet)
+                advisorStatus = "Listening"
+            } else {
+                advisorStatus = hasBrief ? "First check in \(Int(advisorInterval))s" : "No brief — advisor off"
+                startAdvisorLoop()
+            }
             reloadSessions()
         } catch {
+            startingCapture = false
+            recordingID = nil
             phase = .idle
             let ns = error as NSError
             if ns.domain == SCStreamErrorDomain && ns.code == SCStreamError.userDeclined.rawValue {
@@ -262,19 +388,35 @@ final class AppModel: ObservableObject {
     }
 
     func stop() async {
+        // A second Stop or Quit joins the same startup/drain instead of returning early.
+        while phase == .starting || phase == .stopping {
+            await withCheckedContinuation { lifecycleWaiters.append($0) }
+        }
         guard phase == .recording else { return }
         phase = .stopping
+        defer {
+            phase = .idle
+            if !terminating, !modelReady || preparedSpeechEngine != SpeechEngine.selected {
+                Task { await prepareModel() }
+            }
+        }
+        live.stop()
+        advisor.cancel()
         advisorLoop?.cancel()
         advisorLoop = nil
         await recorder.stop()
+        recordingID = nil
+        advisorBusy = false
         volatile = [:]
         if let a = activity { ProcessInfo.processInfo.endActivity(a) }
         activity = nil
         NSApp.dockTile.badgeLabel = nil
         advisorStatus = "Stopped"
-        phase = .idle
         guard let dir = sessionDir else { return }
         let files = SessionFiles(dir: dir)
+        // Recorder drains its queues before returning; use the durable finals even if their
+        // MainActor display callbacks were still queued when the recording token closed.
+        utterances = files.utterances
         notesSave?.cancel()
         files.save(notes: notes)
         meeting.ended = Date()
@@ -283,9 +425,14 @@ final class AppModel: ObservableObject {
         route = .session(dir)
         meeting = MeetingInfo()
         draft = MeetingInfo()
-        if UserDefaults.standard.object(forKey: Prefs.autoSummary) as? Bool ?? true, !utterances.isEmpty {
+        if !terminating, UserDefaults.standard.object(forKey: Prefs.autoSummary) as? Bool ?? true, !utterances.isEmpty {
             summarize(dir)
         }
+    }
+
+    func prepareToTerminate() async {
+        terminating = true
+        await stop()
     }
 
     var advisorInterval: TimeInterval {
@@ -305,19 +452,23 @@ final class AppModel: ObservableObject {
 
     func askNow() async {
         guard isRecording else { return }
+        if selectedProjectID != nil { live.ask("What matters most right now? Suggest a useful question or next step grounded in this discussion."); return }
         guard hasBrief else { advisorStatus = "No brief — advisor off"; return }
         if advisorBusy { advisorStatus = "Still thinking — cycle skipped"; return }
         advisorBusy = true
         advisorStatus = "Checking…"
         let snapshot = utterances
+        let token = recordingID
+        let store = recorder.store
         let outcome = await advisor.run(utterances: snapshot, names: speakerNames)
+        guard isRecording, recordingID == token else { return }
         advisorBusy = false
         let now = Fmt.clock.string(from: Date())
         switch outcome {
         case .items(let items):
             suggestions.insert(contentsOf: items, at: 0)
             latestBatch = Set(items.map(\.id))
-            recorder.store?.appendSuggestions(Advisor.markdown(items))
+            store?.appendSuggestions(Advisor.markdown(items))
             advisorStatus = "Last check \(now) — \(items.count) new"
         case .silent:
             advisorStatus = "Last check \(now) — nothing new"
@@ -442,14 +593,17 @@ final class AppModel: ObservableObject {
 // MARK: - App
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var terminationPending = false
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard #available(macOS 26.0, *) else { return .terminateNow }
         return MainActor.assumeIsolated {
-            guard AppModel.shared.phase == .recording else { return .terminateNow }
+            guard AppModel.shared.phase != .idle else { return .terminateNow }
+            guard !terminationPending else { return .terminateLater }
+            terminationPending = true
             Task { @MainActor in
-                await AppModel.shared.stop()
+                await AppModel.shared.prepareToTerminate()
                 NSApp.reply(toApplicationShouldTerminate: true)
             }
             return .terminateLater
@@ -466,6 +620,11 @@ struct MeetingScribeApp: App {
         }
         .defaultSize(width: 1400, height: 860)
         .commands { MeetingCommands(m: AppModel.shared) }
+
+        Window("Meeting prompter", id: "prompter") {
+            PrompterPanel().environmentObject(AppModel.shared)
+        }
+        .defaultSize(width: 620, height: 600)
 
         MenuBarExtra {
             MenuBarMenu().environmentObject(AppModel.shared)
@@ -485,7 +644,7 @@ struct MeetingCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            Button("New Meeting") { m.route = .prep }
+            Button("Projects") { m.route = .projects }
                 .keyboardShortcut("n")
                 .disabled(m.isRecording)
         }

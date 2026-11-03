@@ -1,6 +1,6 @@
 import Foundation
 
-enum SuggestionKind: String, Sendable {
+enum SuggestionKind: String, Codable, Sendable {
     case ask = "ASK", flag = "FLAG", answer = "ANSWER", note = "NOTE"
 }
 
@@ -22,6 +22,8 @@ final class Advisor: @unchecked Sendable {
     private var contextText = ""
     private var contextMTime: Date?
     private var inFlight = false
+    private var activeTask: Task<ModelResult, Error>?
+    private var generation = 0
     private var recentKeys: [[(SuggestionKind, Set<String>)]] = []   // items from recent responses
 
     enum Outcome: Sendable {
@@ -31,10 +33,16 @@ final class Advisor: @unchecked Sendable {
         case failed(String)
     }
 
+    func cancel() {
+        lock.withLock { generation += 1; activeTask?.cancel() }
+    }
+
     /// Which brief governs this meeting. Changing it drops the cached text and the repeat history.
     func setContext(_ url: URL) {
         lock.withLock {
             guard url != contextURL else { return }
+            generation += 1
+            activeTask?.cancel()
             contextURL = url
             contextText = ""
             contextMTime = nil
@@ -44,14 +52,15 @@ final class Advisor: @unchecked Sendable {
 
     /// Re-reads the brief only when its mtime changes, so it can be edited mid-meeting.
     private func currentContext() throws -> String {
-        let url = lock.withLock { contextURL }
-        let attrs = try FileManager.default.attributesOfItem(atPath: url.path)
-        let mtime = attrs[.modificationDate] as? Date
-        if mtime != contextMTime || contextText.isEmpty {
-            contextText = try String(contentsOf: url, encoding: .utf8)
-            contextMTime = mtime
+        try lock.withLock {
+            let attrs = try FileManager.default.attributesOfItem(atPath: contextURL.path)
+            let mtime = attrs[.modificationDate] as? Date
+            if mtime != contextMTime || contextText.isEmpty {
+                contextText = try String(contentsOf: contextURL, encoding: .utf8)
+                contextMTime = mtime
+            }
+            return contextText
         }
-        return contextText
     }
 
     static func transcriptBlock(_ utterances: [Utterance], now: Date, names: [String: String] = [:]) -> String {
@@ -69,7 +78,7 @@ final class Advisor: @unchecked Sendable {
         if let spk = u.spk {
             who += names[spk].map { " \($0) [\(spk)]" } ?? " speaker \(spk)"
         }
-        return who + (u.ch == .remote ? " (call audio)" : " (\(Prefs.user)'s microphone)")
+        return who + (u.ch == .remote ? " (call audio; identity only if named)" : " (local microphone; may contain multiple people)")
     }
 
     /// Runs one cycle off the caller's thread. Drops the cycle if one is already running.
@@ -80,7 +89,8 @@ final class Advisor: @unchecked Sendable {
             return true
         }
         if !acquired { return .skipped("previous check still running") }
-        defer { lock.withLock { inFlight = false } }
+        let requestGeneration = lock.withLock { generation }
+        defer { lock.withLock { inFlight = false; activeTask = nil } }
 
         let now = Date()
         let transcript = Self.transcriptBlock(utterances, now: now, names: names)
@@ -90,7 +100,17 @@ final class Advisor: @unchecked Sendable {
 
         let prompt = context + "\n\n---\n\n# Live transcript, last 4 minutes\n\n" + transcript + "\n"
 
-        let result = await Self.runClaude(prompt: prompt)
+        let task = Task { try await ModelRunner.run(role: .cue, prompt: prompt, timeout: Self.timeout) }
+        lock.withLock {
+            if generation != requestGeneration { task.cancel() }
+            activeTask = task
+        }
+        let result: RunResult
+        do {
+            result = .success(try await withTaskCancellationHandler(operation: { try await task.value.text }, onCancel: { task.cancel() }))
+        }
+        catch { result = .failure(error.localizedDescription) }
+        guard lock.withLock({ generation == requestGeneration }) else { return .skipped("check cancelled") }
         switch result {
         case .failure(let msg):
             return .failed(msg)
@@ -106,11 +126,8 @@ final class Advisor: @unchecked Sendable {
 
     static func runClaude(prompt: String) async -> RunResult {
         do {
-            let out = try await ClaudeCLI.Run().run(
-                args: ["-p", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
-                // Neutral cwd so no project CLAUDE.md is picked up.
-                cwd: FileManager.default.temporaryDirectory, stdin: prompt, timeout: timeout)
-            return .success(out)
+            let out = try await ModelRunner.run(role: .cue, prompt: prompt, timeout: timeout)
+            return .success(out.text)
         } catch let e as ClaudeCLI.Failure where e.message.hasPrefix("timed out") {
             return .failure("timed out after \(Int(timeout))s, cycle dropped")
         } catch {

@@ -10,6 +10,9 @@ struct LiveView: View {
     @AppStorage("liveTab") var tab = "suggestions"
 
     var body: some View {
+        if m.selectedProjectID != nil {
+            PrompterPanel()
+        } else {
         VStack(spacing: 0) {
             ControlBar(fontSize: $fontSize)
             HSplitView {
@@ -35,6 +38,7 @@ struct LiveView: View {
                 }
                 .frame(minWidth: 480, idealWidth: 860)
             }
+        }
         }
     }
 }

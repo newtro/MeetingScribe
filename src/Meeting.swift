@@ -19,6 +19,8 @@ struct MeetingInfo: Codable, Equatable, Sendable {
     var brief: String?                    // brief path used for the session
     var started: Date?
     var ended: Date?
+    var projectID: UUID?
+    var preparedPacketID: UUID?
 
     var materialURLs: [URL] { materials.map { URL(fileURLWithPath: $0) } }
 }

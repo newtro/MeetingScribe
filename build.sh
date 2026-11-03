@@ -3,12 +3,13 @@
 set -euo pipefail
 cd "${0:A:h}"
 APP=build/MeetingScribe.app
+SPEECH_CACHE="${MEETINGSCRIBE_MODEL_CACHE:-build/models}"
 
 # Nemotron 3 diarization model (FluidAudio Core ML port, `fast32` = 2.88 s streaming preset), bundled into the app
 # so a meeting never downloads anything. Fetched once into build/models and pinned to one repo revision.
 MODEL_REPO=FluidInference/nemotron-3-diarization-coreml
 MODEL_REV=53445f72d5735e33406ccce7b92116bce7ab1ab7
-MODEL_DIR=build/models/Nemotron3
+MODEL_DIR="$SPEECH_CACHE/Nemotron3"
 BUNDLE=Nemotron3Diarizer_fast32.mlmodelc
 if [[ ! -f "$MODEL_DIR/.rev-$MODEL_REV-$BUNDLE" ]]; then
   echo "fetching $BUNDLE ($MODEL_REPO@${MODEL_REV:0:8}, ~200 MB)…"
@@ -25,6 +26,11 @@ if [[ ! -f "$MODEL_DIR/.rev-$MODEL_REV-$BUNDLE" ]]; then
   touch "$MODEL_DIR/.rev-$MODEL_REV-$BUNDLE"
 fi
 
+# The 640 ms int8 encoder and shared decoder/joint only (~610 MB); all files verified against
+# the immutable repository's Git/LFS digests. No runtime downloads or alternate tier bundles.
+UNIFIED_DIR="$SPEECH_CACHE/UnifiedSpeech"
+python3 scripts/fetch-unified-speech.py "$UNIFIED_DIR"
+
 swift build -c release --product MeetingScribe
 BIN="$(swift build -c release --show-bin-path)/MeetingScribe"
 
@@ -35,6 +41,7 @@ cp Info.plist "$APP/Contents/Info.plist"
 cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 mkdir -p "$APP/Contents/Resources/Nemotron3"
 cp -R "$MODEL_DIR/$BUNDLE" "$MODEL_DIR/learnable_sil_emb.bin" "$APP/Contents/Resources/Nemotron3/"
+cp -R "$UNIFIED_DIR" "$APP/Contents/Resources/UnifiedSpeech"
 # Ad-hoc (-) ties TCC grants to one exact binary; a stable identity keeps them across rebuilds.
 codesign --force --deep --sign "${SIGN_ID:-ImageSmith Dev}" "$APP"
 codesign --verify --verbose "$APP"

@@ -1,18 +1,22 @@
 import Foundation
 
-enum Channel: String, Sendable {
+enum Channel: String, Codable, Sendable {
     case remote, local
 
     var label: String { self == .remote ? "REMOTE" : "LOCAL" }
 }
 
 struct Utterance: Identifiable, Sendable {
-    let id = UUID()
+    let id: UUID
     let t: Date
     let ch: Channel
     let text: String
     /// Diarized speaker within the channel (R1…R8 / L1…L8), arrival-ordered per session; nil if unknown.
     var spk: String? = nil
+
+    init(id: UUID = UUID(), t: Date, ch: Channel, text: String, spk: String? = nil) {
+        self.id = id; self.t = t; self.ch = ch; self.text = text; self.spk = spk
+    }
 }
 
 enum Paths {
@@ -71,10 +75,13 @@ final class SessionStore: @unchecked Sendable {
     private let jsonl: FileHandle
     private let txt: FileHandle
     private var suggestions: FileHandle?
+    var onWriteError: (@Sendable (String) -> Void)?
+    private(set) var writeFailed = false
+    private var closed = false
 
-    init(start: Date) throws {
+    init(start: Date, sessionsRoot: URL = Paths.sessions) throws {
         self.start = start
-        let d = Paths.sessions.appendingPathComponent(Fmt.iso.string(from: start), isDirectory: true)
+        let d = sessionsRoot.appendingPathComponent(Fmt.iso.string(from: start), isDirectory: true)
         dir = d
         let fm = FileManager.default
         try fm.createDirectory(at: d, withIntermediateDirectories: true)
@@ -107,27 +114,37 @@ final class SessionStore: @unchecked Sendable {
                 if !FileManager.default.fileExists(atPath: url.path) {
                     FileManager.default.createFile(atPath: url.path, contents: nil)
                 }
-                suggestions = try? FileHandle(forWritingTo: url)
-                _ = try? suggestions?.seekToEnd()
+                do {
+                    suggestions = try FileHandle(forWritingTo: url)
+                    _ = try suggestions?.seekToEnd()
+                } catch { report(error) }
             }
             if let h = suggestions { write(h, markdown) }
         }
     }
 
     private func write(_ h: FileHandle, _ s: String) {
+        guard !closed else { return }
         do {
             try h.write(contentsOf: Data(s.utf8))
             try h.synchronize()
         } catch {
-            NSLog("MeetingScribe write failed: \(error)")
+            report(error)
         }
+    }
+
+    private func report(_ error: Error) {
+        writeFailed = true
+        onWriteError?("Meeting files could not be saved: \(error.localizedDescription)")
+        NSLog("MeetingScribe write failed: \(error)")
     }
 
     func close() {
         queue.sync {
-            try? jsonl.close()
-            try? txt.close()
-            try? suggestions?.close()
+            guard !closed else { return }
+            closed = true
+            do { try jsonl.close(); try txt.close(); try suggestions?.close() }
+            catch { report(error) }
         }
     }
 }

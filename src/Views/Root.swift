@@ -13,6 +13,7 @@ struct RootView: View {
             VStack(spacing: 0) {
                 if let b = m.blocker { PermissionBanner(blocker: b) }
                 if let e = m.errorText { ErrorBanner(text: e) { m.errorText = nil } }
+                if let e = m.persistenceError { Text(e).font(.headline).foregroundStyle(.white).padding(12).frame(maxWidth: .infinity).background(.red) }
                 detail
             }
             .background(Color(nsColor: .windowBackgroundColor))
@@ -20,12 +21,20 @@ struct RootView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if !m.isRecording { m.reloadBriefs() }
             m.reloadSessions()
+            m.reloadProjects()
+        }
+        .onChange(of: m.route) { _, route in
+            if route == .prep, m.phase == .idle { m.selectedProjectID = nil; m.preparation.cancel() }
         }
         .navigationTitle(m.isRecording ? "● Recording — \(m.meeting.title)" : "MeetingScribe")
     }
 
     @ViewBuilder private var detail: some View {
         switch m.route {
+        case .projects: ProjectsView()
+        case .project(let id):
+            if let project = m.projects.first(where: { $0.id == id }) { ProjectPreparationView(prep: m.preparation, project: project) }
+            else { ProjectsView() }
         case .prep: PrepView()
         case .live: LiveView()
         case .brief(let url): BriefView(url: url).id(url)
@@ -51,7 +60,8 @@ struct Sidebar: View {
                 }
                 .tag(AppModel.Route.live)
             }
-            Label("New Meeting", systemImage: "plus.circle.fill")
+            Label("Projects", systemImage: "folder.fill").tag(AppModel.Route.projects)
+            Label("Manual meeting", systemImage: "plus.circle")
                 .tag(AppModel.Route.prep)
 
             Section("Briefs") {
@@ -167,15 +177,17 @@ struct SettingsView: View {
     @AppStorage(Prefs.advisorInterval) private var interval: Double = 45
     @AppStorage(Prefs.autoSummary) private var autoSummary = true
     @AppStorage(Prefs.briefModel) private var briefModel = ""
+    @AppStorage("speechEngine") private var speechEngine = "unified"
 
     var body: some View {
         Form {
             Section("You") {
                 TextField("Your name", text: $userName, prompt: Text(Prefs.user))
-                Text("Used in briefs, the advisor prompt (“\(Prefs.user)'s microphone”) and summaries.")
+                Text("Used in briefs and summaries. Microphone channel does not establish a speaker’s identity.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Live advisor") {
+                Text("Project meetings listen continuously. This interval applies to manual briefs.").font(.caption).foregroundStyle(.secondary)
                 Picker("Check every", selection: $interval) {
                     Text("30 seconds").tag(30.0)
                     Text("45 seconds").tag(45.0)
@@ -186,6 +198,22 @@ struct SettingsView: View {
             }
             Section("After the meeting") {
                 Toggle("Write a summary automatically when recording stops", isOn: $autoSummary)
+            }
+            Section("On-device transcription") {
+                Picker("Speech engine", selection: $speechEngine) {
+                    Text("Parakeet Unified · 640 ms").tag("unified")
+                    Text("Apple SpeechAnalyzer").tag("apple")
+                }.onChange(of: speechEngine) { _, _ in AppModel.shared.speechEngineChanged() }
+                Text("Nemotron 3 provides speaker labels. Engine changes apply to the next meeting; models are prepared locally before capture.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Model roles") {
+                ModelRoleSettings(role: .prepare, title: "Preparation")
+                ModelRoleSettings(role: .detect, title: "Attention detector")
+                ModelRoleSettings(role: .cue, title: "Quick answers")
+                ModelRoleSettings(role: .research, title: "Technical research")
+                ModelRoleSettings(role: .summary, title: "Summary")
+                Text("Fast mode is a per-meeting premium option for Opus research. It starts off and never changes global Claude settings.").font(.caption).foregroundStyle(.secondary)
             }
             Section("Claude") {
                 TextField("claude CLI", text: $claudePath, prompt: Text(ClaudeCLI.path))

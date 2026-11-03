@@ -293,10 +293,8 @@ enum Summarizer {
         if !highlights.isEmpty { p += "\n<marked_moments>\n\(highlights)\n</marked_moments>\n" }
         p += "\n<transcript>\n\(transcript)\n</transcript>\n"
 
-        let out = try await ClaudeCLI.Run().run(
-            args: ["-p", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--no-session-persistence"],
-            cwd: FileManager.default.temporaryDirectory, stdin: p, timeout: timeout)
-        let text = out.trimmingCharacters(in: .whitespacesAndNewlines)
+        let out = try await ModelRunner.run(role: .summary, prompt: p, timeout: timeout)
+        let text = out.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw ClaudeCLI.Failure(message: "Claude returned an empty summary") }
         return text + "\n"
     }

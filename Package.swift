@@ -7,9 +7,8 @@ let package = Package(
     name: "MeetingScribe",
     platforms: [.macOS("26.0")],
     dependencies: [
-        // Nemotron 3 streaming diarization on Core ML. Pinned exactly: the Nemotron 3 port is new.
-        // traits: [] drops the prebuilt NeMo text-normalization engine, which only TTS/ITN use.
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.17.1", traits: []),
+        // Unified streaming ASR/timings + Nemotron 3 diarization; no TTS or text-normalization engine.
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", exact: "0.18.2", traits: ["Diarizer"]),
     ],
     targets: [
         .executableTarget(

@@ -9,8 +9,7 @@ import Foundation
 /// At the `fast32` preset each channel costs well under 1% of real time on the Neural Engine.
 final class DiarizationEngine: @unchecked Sendable {
     static let shared = DiarizationEngine()
-    /// 2.88 s latency (2.56 s chunk + 0.32 s look-ahead). Beats the 1.04 s `low` profile on AMI (DER 9.53 vs 9.75,
-    /// speaker-count accuracy 94% vs 75%) at a fraction of the per-call cost; finals rarely arrive sooner anyway.
+    /// 2.88 s model context (2.56 s chunk + 0.32 s look-ahead); advisory speech does not wait for it.
     static let config = Nemotron3Config.fast32
     static var modelDirectory: URL? { Bundle.main.resourceURL?.appendingPathComponent("Nemotron3", isDirectory: true) }
 
@@ -31,6 +30,23 @@ final class DiarizationEngine: @unchecked Sendable {
             return t
         }
         return try await task.value
+    }
+
+    /// Preflight includes a first prediction using synthetic silence, never microphone capture.
+    /// Shared model I/O remains serialized with any active diarizers.
+    func prepare() async throws {
+        let models = try await models()
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            queue.async {
+                do {
+                    let probe = Nemotron3Diarizer(config: Self.config, models: models)
+                    probe.appendAudio([Float](repeating: 0, count: Int(Self.config.latencySeconds * 16_000)))
+                    _ = try probe.processBufferedAudio()
+                    _ = try probe.finishStream()
+                    done.resume()
+                } catch { done.resume(throwing: error) }
+            }
+        }
     }
 }
 
@@ -189,6 +205,9 @@ final class ChannelDiarizer: @unchecked Sendable {
 
     private func convert(_ buf: AVAudioPCMBuffer) -> [Float]? {
         let inFormat = buf.format
+        if inFormat == outFormat, let p = buf.floatChannelData?[0] {
+            return Array(UnsafeBufferPointer(start: p, count: Int(buf.frameLength)))
+        }
         if converter == nil || converterInputFormat != inFormat {
             converter = AVAudioConverter(from: inFormat, to: outFormat)
             converter?.primeMethod = .none

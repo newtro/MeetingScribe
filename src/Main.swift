@@ -9,7 +9,12 @@ import SwiftUI
 enum Main {
     static func main() {
         let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--advisortest"), i + 1 < args.count {
+        let output = args.firstIndex(of: "--out").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        if args.contains("--workflowtest") {
+            WorkflowTests.run(out: output)
+        } else if let i = args.firstIndex(of: "--projectcheck"), i + 1 < args.count {
+            WorkflowTests.prepareProject(folder: args[i + 1], out: output)
+        } else if let i = args.firstIndex(of: "--advisortest"), i + 1 < args.count {
             let b = args.firstIndex(of: "--brief").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
             DevModes.advisor(jsonl: args[i + 1], brief: b)
         } else if let i = args.firstIndex(of: "--render"), i + 1 < args.count {
@@ -259,7 +264,7 @@ enum DevModes {
             m.route = .prep
             var job = AppModel.BuildJob(target: nil, refining: false)
             job.started = now.addingTimeInterval(-74)
-            job.steps = ["· I'll start by listing the materials.", "Listing **/*", "Reading SOW-4.pdf", "Reading notes/2026-09-10.md",
+            job.steps = ["· I'll start by listing the materials.", "Listing **/*", "Reading project-scope.pdf", "Reading notes/2026-09-10.md",
                          "Searching for “export”", "Running git log --oneline -20", "· The SOW excludes integrations; checking the change log.", "Reading CHANGELOG.md"]
             m.job = job
         case "brief":

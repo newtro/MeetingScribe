@@ -1,9 +1,18 @@
-<?xml version="1.0" encoding="utf-8"?>
-<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+<?xml version='1.0' encoding='utf-8'?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
   <channel>
     <title>MeetingScribe</title>
     <link>https://github.com/newtro/MeetingScribe</link>
     <description>MeetingScribe updates</description>
     <language>en</language>
+    <item>
+      <title>Version 1.1.1</title>
+      <pubDate>Tue, 03 Nov 2026 03:46:47 GMT</pubDate>
+      <sparkle:version>6</sparkle:version>
+      <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>https://github.com/newtro/MeetingScribe/releases/tag/v1.1.1</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/newtro/MeetingScribe/releases/download/v1.1.1/MeetingScribe-1.1.1.zip" type="application/octet-stream" sparkle:edSignature="nTpwKAS16lOs5NfOwbsdBFmsbBkreX2FvxQDgdnJMIgF+KC1JKevzrqJ4wplwFZyd+WTGMhdkwpm4ngTVYWWBw==" length="700712178" />
+    </item>
   </channel>
 </rss>

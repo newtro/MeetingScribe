@@ -6,7 +6,7 @@ The feed is `https://raw.githubusercontent.com/newtro/MeetingScribe/main/appcast
 
 ## First release and signing identity
 
-The first updater release is **1.1.0**. Marketing versions use `major.minor.patch`; build numbers are the pinned source commit count and must exceed every build already in the appcast. Do not rewrite release history or reuse a version/tag.
+The first updater release is **1.1.1**. Marketing versions use `major.minor.patch`; build numbers are the pinned source commit count and must exceed every build already in the appcast. Do not rewrite release history or reuse a version/tag.
 
 Normal developer builds retain the stable **ImageSmith Dev** signature. Do not use ad-hoc signing. Production releases use **Developer ID Application, team 232A77467G**, hardened runtime, Apple notarization and a stapled ticket. Moving an existing ImageSmith Dev installation to Developer ID is a one-time signing-identity transition: check Screen Recording and microphone access on the installed release and, if macOS requests it, regrant access. Subsequent updates preserve the Developer ID identity. Never silently fall back to the development identity when updating an installed Developer ID app.
 
@@ -17,11 +17,11 @@ The cloud-signing helper requires the authorized Apple account in Xcode Settings
 Commit the intended source and scripts first. Untracked planning notes are allowed in the main checkout: releases use a separate detached worktree of the exact commit, so `.Codex/`, untracked `AGENTS.md`, local client planning, and runtime meeting data are not copied or pushed. Tracked changes must be committed. Before publication, the pinned commit must equal the checkout's HEAD **and** remote `main`.
 
 ```sh
-scripts/release.sh prepare 1.1.0
-scripts/release.sh submit 1.1.0
-scripts/release.sh finish 1.1.0
-scripts/release.sh publish 1.1.0
-scripts/release.sh status 1.1.0
+scripts/release.sh prepare 1.1.1
+scripts/release.sh submit 1.1.1
+scripts/release.sh finish 1.1.1
+scripts/release.sh publish 1.1.1
+scripts/release.sh status 1.1.1
 ```
 
 - **prepare** pins HEAD in `build/releases/<version>/src`, reuses `build/models` through `MEETINGSCRIBE_MODEL_CACHE`, builds with an Apple Development signature and hardened runtime, runs the offline workflow tests, validates version/build and verifies the existing Sparkle public key. Override the development identity with `MEETINGSCRIBE_DEVELOPMENT_SIGN_ID` only for another suitable identity on the same team.

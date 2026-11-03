@@ -197,6 +197,10 @@ final class AppModel: ObservableObject {
     // MARK: Brief building
 
     func buildBrief() {
+        guard !AppUpdater.shared.installationInProgress else {
+            errorText = "MeetingScribe is updating. Try again after it reopens."
+            return
+        }
         guard job?.running != true else { return }
         var info = draft
         if info.title.trimmingCharacters(in: .whitespaces).isEmpty { info.title = "Meeting" }
@@ -225,6 +229,10 @@ final class AppModel: ObservableObject {
 
     /// Asks Claude to revise a brief in place. The previous text is kept in contexts/.meta/<name>.prev.md.
     func refine(_ url: URL, instruction: String) {
+        guard !AppUpdater.shared.installationInProgress else {
+            errorText = "MeetingScribe is updating. Try again after it reopens."
+            return
+        }
         guard job?.running != true, !instruction.trimmingCharacters(in: .whitespaces).isEmpty,
               let current = try? String(contentsOf: url, encoding: .utf8) else { return }
         var info = meta(forBrief: url) ?? MeetingInfo()
@@ -522,6 +530,10 @@ final class AppModel: ObservableObject {
     // MARK: After the meeting
 
     func summarize(_ dir: URL) {
+        guard !AppUpdater.shared.installationInProgress else {
+            errorText = "MeetingScribe is updating. Try again after it reopens."
+            return
+        }
         guard !summarizing.contains(dir) else { return }
         summarizing.insert(dir)
         summaryErrors[dir] = nil

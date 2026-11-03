@@ -1,0 +1,71 @@
+MeetingScribe third-party software and model notices
+
+The licenses in this directory apply to the corresponding third-party components,
+not to MeetingScribe as a whole. Copyright and other rights remain with their
+respective owners. Inclusion does not imply endorsement. Full upstream license
+texts are included; sources.json records their sources and SHA-256 digests.
+
+FLUIDAUDIO 0.18.2
+FluidInference and FluidAudio contributors.
+Source: https://github.com/FluidInference/FluidAudio
+Revision: e396cf780c4abf8e395087467c0585d3b0d17f68
+License: Apache License 2.0; see FluidAudio-Apache-2.0.txt.
+The SDK is linked without local source modifications. The Diarizer feature is
+included. Notices for the SDK's VBx and fastcluster-derived implementations are
+retained in FluidAudio-VBx-Apache-2.0.txt and FluidAudio-fastcluster-BSD.txt.
+Optional TTS engines and NemoTextProcessing are not bundled by MeetingScribe.
+
+SPARKLE 2.10.0
+Sparkle authors and contributors; copyright owners are listed in the accompanying
+license. Source: https://github.com/sparkle-project/Sparkle
+Revision: eef1a539a373c1f1a320624b1130fc5de7b2e100
+License: MIT, plus the upstream external-component notices for bsdiff/bspatch,
+sais-lite, Ed25519 and other included components. The full combined upstream
+text is Sparkle-License-and-External-Licenses.txt. The distributed framework is
+unmodified apart from application-specific code signing.
+
+PARAKEET UNIFIED EN 0.6B — CORE ML CONVERSION
+Original model by NVIDIA. Core ML conversion and Swift integration by the
+FluidInference team. Source and license declaration:
+https://huggingface.co/FluidInference/parakeet-unified-en-0.6b-coreml/tree/d32e972dd4315f1dc3f6be28fb2aab0ab3e80358
+Converted-model revision: d32e972dd4315f1dc3f6be28fb2aab0ab3e80358
+The conversion is released under Creative Commons Attribution 4.0 International.
+Full license: CC-BY-4.0.txt
+License URL: https://creativecommons.org/licenses/by/4.0/
+MeetingScribe redistributes the upstream int8 640 ms (70,7,1) streaming encoder,
+shared decoder/joint and supporting metadata/vocabulary. It selects this subset
+and integrates it into an app; it does not further modify the model weights.
+The upstream Core ML conversion and quantization are modifications of NVIDIA's
+base model, as documented by FluidInference.
+
+NVIDIA PARAKEET BASE MODEL
+Source: https://huggingface.co/nvidia/parakeet-unified-en-0.6b/tree/fe53cd885760c96b6a5f51a0bfd362cb4584a98b
+Base model reference revision: fe53cd885760c96b6a5f51a0bfd362cb4584a98b
+Licensed by NVIDIA Corporation under the NVIDIA Open Model License
+The original model's NVIDIA Open Model License remains included alongside the
+converted-model license. See NVIDIA-Open-Model-License.txt and the official
+NVIDIA-Open-Model-License-2025-10-24.pdf. The formatted PDF is the unmodified
+agreement distributed by NVIDIA; the text file is a readable transcription of
+the complete official license article.
+https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/
+
+NEMOTRON 3 DIARIZATION — CORE ML CONVERSION
+Original model by NVIDIA. Core ML conversion by FluidInference.
+Converted source:
+https://huggingface.co/FluidInference/nemotron-3-diarization-coreml/tree/53445f72d5735e33406ccce7b92116bce7ab1ab7
+Converted-model revision: 53445f72d5735e33406ccce7b92116bce7ab1ab7
+Base source:
+https://huggingface.co/nvidia/Nemotron-3-Diarization/tree/f667ed73aee57d40cc39428eb768b4fd87a0a29e
+Base model reference revision: f667ed73aee57d40cc39428eb768b4fd87a0a29e
+License: OpenMDW License Agreement, version 1.1 (OpenMDW-1.1).
+Full license: OpenMDW-1.1.txt
+License URL: https://openmdw.ai/license/1-1/
+MeetingScribe redistributes the upstream monolithic fast32 model and learned
+silence embedding without further weight modification. FluidInference converted
+the model to Core ML for on-device use.
+
+The base-model reference revisions above identify the upstream source/license
+snapshots consulted for this distribution. The converted model revisions identify
+the exact artifacts bundled by MeetingScribe; no claim is made that an upstream
+conversion's training or conversion lineage can be independently reconstructed
+from the base-model reference revision alone.

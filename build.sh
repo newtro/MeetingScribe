@@ -47,6 +47,8 @@ cp Info.plist "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" "$APP/Contents/Info.plist"
 ditto "${BIN:h}/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
 cp AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# Ship redistribution terms and attribution with the SDKs and bundled model weights.
+ditto Resources/ThirdPartyNotices "$APP/Contents/Resources/ThirdPartyNotices"
 mkdir -p "$APP/Contents/Resources/Nemotron3"
 cp -R "$MODEL_DIR/$BUNDLE" "$MODEL_DIR/learnable_sil_emb.bin" "$APP/Contents/Resources/Nemotron3/"
 cp -R "$UNIFIED_DIR" "$APP/Contents/Resources/UnifiedSpeech"

@@ -1,0 +1,53 @@
+{
+  "retrieved": "2026-11-03",
+  "files": [
+    {
+      "file": "FluidAudio-Apache-2.0.txt",
+      "source": "https://github.com/FluidInference/FluidAudio/blob/e396cf780c4abf8e395087467c0585d3b0d17f68/LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "copy": "unmodified upstream text"
+    },
+    {
+      "file": "Sparkle-License-and-External-Licenses.txt",
+      "source": "https://github.com/sparkle-project/Sparkle/blob/eef1a539a373c1f1a320624b1130fc5de7b2e100/LICENSE",
+      "sha256": "389a4e4e9a32f059775b13a06e25a591445ba229d2838d26dd3e7c0c45127cfe",
+      "copy": "unmodified upstream combined license text"
+    },
+    {
+      "file": "FluidAudio-VBx-Apache-2.0.txt",
+      "source": "https://github.com/FluidInference/FluidAudio/blob/e396cf780c4abf8e395087467c0585d3b0d17f68/ThirdPartyLicenses/vbx-LICENSE.md",
+      "sha256": "08e57fdb5187c816e937916f1e176aadb400ca76f4b3b493d69730ec8f10dd80",
+      "copy": "unmodified upstream text"
+    },
+    {
+      "file": "FluidAudio-fastcluster-BSD.txt",
+      "source": "https://github.com/FluidInference/FluidAudio/blob/e396cf780c4abf8e395087467c0585d3b0d17f68/ThirdPartyLicenses/fastcluster-LICENSE.md",
+      "sha256": "67594dbe4a7477719c8160373e7767c2c319ef966a6042f76846a18af02cde0a",
+      "copy": "unmodified upstream text"
+    },
+    {
+      "file": "CC-BY-4.0.txt",
+      "source": "https://creativecommons.org/licenses/by/4.0/legalcode.txt",
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+      "copy": "unmodified official legal code"
+    },
+    {
+      "file": "OpenMDW-1.1.txt",
+      "source": "https://openmdw.ai/license/1-1/",
+      "sha256": "4b126232937611510f638632b554733444bd8523023be54bdb64adaf529f3a26",
+      "copy": "complete official license article rendered as plain text"
+    },
+    {
+      "file": "NVIDIA-Open-Model-License.txt",
+      "source": "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+      "sha256": "a3f6f7a9932aa079438433df41e9fdcd69589f2303a40ea9035200e3ab170f1d",
+      "copy": "complete official license article rendered as plain text; official PDF also included"
+    },
+    {
+      "file": "NVIDIA-Open-Model-License-2025-10-24.pdf",
+      "source": "https://www.nvidia.com/content/dam/en-zz/Solutions/license-agreements/enterprise-software/nvidia-open-model-license-agreements-24-10-2025.pdf",
+      "sha256": "4d2fb590aa9b30c47f2058bff17291df7fa2aa0c1bd775a20703da9bb267cfab",
+      "copy": "unmodified official agreement PDF"
+    }
+  ]
+}

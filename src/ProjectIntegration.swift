@@ -17,6 +17,10 @@ extension AppModel {
     }
 
     func createProject(name: String, root: URL) {
+        guard !AppUpdater.shared.installationInProgress else {
+            errorText = "MeetingScribe is updating. Try again after it reopens."
+            return
+        }
         guard phase == .idle else { return }
         do {
             let project = try projectStore.create(name: name, root: root)
@@ -26,6 +30,10 @@ extension AppModel {
     }
 
     func openProject(_ id: UUID) {
+        guard !AppUpdater.shared.installationInProgress else {
+            errorText = "MeetingScribe is updating. Try again after it reopens."
+            return
+        }
         guard phase == .idle, let project = projects.first(where: { $0.id == id }) else { return }
         selectedProjectID = id
         route = .project(id)
@@ -34,6 +42,10 @@ extension AppModel {
     }
 
     func refreshProject() {
+        guard !AppUpdater.shared.installationInProgress else {
+            errorText = "MeetingScribe is updating. Try again after it reopens."
+            return
+        }
         guard let project = selectedProject else { return }
         preparation.prepare(project)
     }

@@ -6,6 +6,15 @@
     <description>MeetingScribe updates</description>
     <language>en</language>
     <item>
+      <title>Version 1.1.2</title>
+      <pubDate>Tue, 03 Nov 2026 14:44:46 GMT</pubDate>
+      <sparkle:version>9</sparkle:version>
+      <sparkle:shortVersionString>1.1.2</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:releaseNotesLink>https://github.com/newtro/MeetingScribe/releases/tag/v1.1.2</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/newtro/MeetingScribe/releases/download/v1.1.2/MeetingScribe-1.1.2.zip" type="application/octet-stream" sparkle:edSignature="Q0RiqG+0JY8JDCYXYmxiWisLSXrDC5KSRJHxtEGpB0hNfsh0tlxZJCHbJkSKQ9Fsvo0RKXiVJoYLO5V1LkDEBw==" length="700715898" />
+    </item>
+    <item>
       <title>Version 1.1.1</title>
       <pubDate>Tue, 03 Nov 2026 03:46:47 GMT</pubDate>
       <sparkle:version>6</sparkle:version>

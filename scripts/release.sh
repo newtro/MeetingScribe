@@ -198,7 +198,7 @@ PY
     FEED_COMMIT="$(git -C "$FEED_SRC" rev-parse HEAD)"; put feedCommit "$FEED_COMMIT"
   fi
   [[ "$(remote_main)" == "$SHA" ]] || die 'Remote main moved; release exists but feed remains unpublished. Do not force-push.'
-  git -C "$ROOT" push origin "$FEED_COMMIT:refs/heads/main"
+  git -C "$ROOT" push origin "${FEED_COMMIT}:refs/heads/main"
   put published yes
   print "Published https://github.com/$REPO/releases/tag/$TAG"
   print 'Only appcast.xml was committed by the publication step. Your checkout remains at its source commit.'

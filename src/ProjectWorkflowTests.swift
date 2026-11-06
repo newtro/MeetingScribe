@@ -138,6 +138,26 @@ enum ProjectWorkflowTests {
         try require(try store.excerpts(for: packet).count == corpus.count, "corpus must round trip")
         do { try store.publish(packet: packet, manifest: manifest, excerpts: corpus); throw ProjectFailure("Immutable packet was overwritten.") }
         catch let error as ProjectFailure { try require(error.message == "Prepared packets are immutable.", "unexpected immutable publication failure") }
+        // One overrunning claim is omitted with a coverage note; the supported claim still publishes.
+        var mixed = try JSONSerialization.jsonObject(with: Data(result.text.utf8)) as! [String: Any]
+        var mixedClaims = mixed["claims"] as! [[String: Any]]
+        var overrun = mixedClaims[0]; overrun["key"] = "overrun"; overrun["quotes"] = []
+        mixedClaims.append(overrun); mixed["claims"] = mixedClaims
+        var second = mixedClaims[0]; second["key"] = "second"
+        mixedClaims.insert(second, at: 1); mixed["claims"] = mixedClaims
+        mixed["topics"] = [["key": "kept", "title": "Kept", "claimKeys": ["documented", "second"], "priority": "attention", "reason": "Supported."],
+                           ["key": "both", "title": "Both", "claimKeys": ["documented", "overrun"], "priority": "attention", "reason": "Mixed."]]
+        mixed["summaryClaimKeys"] = ["documented", "overrun"]
+        let partial = try ProjectPacketBuilder.packet(text: String(decoding: try JSONSerialization.data(withJSONObject: mixed), as: UTF8.self),
+            model: result.receipt, project: profile, manifest: refreshed.manifest, excerpts: selected)
+        try require(partial.claims.count == 2 && partial.topics.map(\.key) == ["kept"]
+                    && partial.coverageNotes.contains { $0.contains("1 prepared claim(s) were omitted") && $0.contains("overrun") },
+                    "a failing claim must be omitted and named; topics that lost a claim are dropped")
+        mixed["claims"] = [mixedClaims[0], overrun, { var o = overrun; o["key"] = "overrun2"; return o }()]
+        mixed["topics"] = []; mixed["summaryClaimKeys"] = []
+        do { _ = try ProjectPacketBuilder.packet(text: String(decoding: try JSONSerialization.data(withJSONObject: mixed), as: UTF8.self),
+                 model: result.receipt, project: profile, manifest: refreshed.manifest, excerpts: selected); throw ProjectFailure("Mostly unsupported packet accepted.") }
+        catch let error as ProjectFailure { try require(error.message.hasPrefix("2 of 3 prepared claims failed"), "a mostly invalid packet must fail") }
         var invalid = packet.claims; invalid[0].quotes = ["not present in supplied source"]
         do { try PacketValidator.validateClaims(invalid, excerpts: corpus); throw ProjectFailure("Invalid quote accepted.") }
         catch let error as ProjectFailure { try require(error.message.contains("unknown source") || error.message.contains("quote not present"), "invalid citation must be rejected") }

@@ -286,19 +286,27 @@ final class ProjectStore: @unchecked Sendable {
 enum PacketValidator {
     static func validateClaims(_ claims: [EvidenceClaim], excerpts: [SourceExcerpt]) throws {
         guard claims.count <= 40, Set(claims.map(\.id)).count == claims.count else { throw ProjectFailure("Invalid number or identity of claims.") }
-        let sources = Dictionary(excerpts.map { ($0.source.id, $0) }, uniquingKeysWith: { first, _ in first })
-        for c in claims {
-            guard !c.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  c.text.split(whereSeparator: \.isWhitespace).count <= 100,
-                  c.sourceIDs.count == c.quotes.count, c.sourceIDs.count <= 8 else { throw ProjectFailure("A claim exceeded its evidence or length bounds.") }
-            let expected: ClaimScope = c.kind == .fact ? .sourceContent : c.kind == .reported ? .reportedOutcome : .suggestedAction
-            guard c.scope == expected else { throw ProjectFailure("Claim status and scope disagree.") }
-            if c.sourceIDs.isEmpty {
-                guard c.kind == .proposal, c.text.contains("?"), c.text.lowercased().contains("unverified") else { throw ProjectFailure("An unsupported proposal must be an explicitly unverified investigation question.") }
-            }
-            for (id, quote) in zip(c.sourceIDs, c.quotes) {
-                guard let source = sources[id], !quote.isEmpty, source.text.contains(quote) else { throw ProjectFailure("A claim contains an unknown source or a quote not present in that source.") }
-            }
+        let sources = sourceIndex(excerpts)
+        for c in claims { try validate(c, sources: sources) }
+    }
+
+    static func sourceIndex(_ excerpts: [SourceExcerpt]) -> [String: SourceExcerpt] {
+        Dictionary(excerpts.map { ($0.source.id, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// One claim's own evidence and bounds. Claims stand alone, so a failing claim can be omitted without
+    /// weakening any other claim's support.
+    static func validate(_ c: EvidenceClaim, sources: [String: SourceExcerpt]) throws {
+        guard !c.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              c.text.split(whereSeparator: \.isWhitespace).count <= 100,
+              c.sourceIDs.count == c.quotes.count, c.sourceIDs.count <= 8 else { throw ProjectFailure("A claim exceeded its evidence or length bounds.") }
+        let expected: ClaimScope = c.kind == .fact ? .sourceContent : c.kind == .reported ? .reportedOutcome : .suggestedAction
+        guard c.scope == expected else { throw ProjectFailure("Claim status and scope disagree.") }
+        if c.sourceIDs.isEmpty {
+            guard c.kind == .proposal, c.text.contains("?"), c.text.lowercased().contains("unverified") else { throw ProjectFailure("An unsupported proposal must be an explicitly unverified investigation question.") }
+        }
+        for (id, quote) in zip(c.sourceIDs, c.quotes) {
+            guard let source = sources[id], !quote.isEmpty, source.text.contains(quote) else { throw ProjectFailure("A claim contains an unknown source or a quote not present in that source.") }
         }
     }
 }

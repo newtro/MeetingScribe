@@ -120,11 +120,12 @@ enum ProjectPacketBuilder {
         let string: [String: Any] = ["type": "string"]
         let strings: [String: Any] = ["type": "array", "items": string]
         let optional: [String: Any] = ["type": ["string", "null"]]
+        let cited: [String: Any] = ["type": "array", "items": string, "maxItems": 3]
         let claim: [String: Any] = ["type": "object", "additionalProperties": false,
             "properties": ["key": string, "text": string,
                 "kind": ["type": "string", "enum": ["fact", "reported", "proposal"]],
                 "scope": ["type": "string", "enum": ["sourceContent", "reportedOutcome", "suggestedAction"]],
-                "sourceIDs": strings, "quotes": strings, "environment": optional, "dateQualifier": optional],
+                "sourceIDs": cited, "quotes": cited, "environment": optional, "dateQualifier": optional],
             "required": ["key", "text", "kind", "scope", "sourceIDs", "quotes", "environment", "dateQualifier"]]
         let topic: [String: Any] = ["type": "object", "additionalProperties": false,
             "properties": ["key": string, "title": string, "claimKeys": strings,
@@ -145,18 +146,40 @@ enum ProjectPacketBuilder {
               content.coverageNotes.allSatisfy({ $0.count <= 600 }),
               Set(content.claims.map(\.key)).count == content.claims.count,
               content.claims.allSatisfy({ !$0.key.isEmpty && $0.key.count <= 60 }) else { throw ProjectFailure("Prepared context exceeded its bounds or contained no supported claims.") }
-        let ids = Dictionary(uniqueKeysWithValues: content.claims.map { ($0.key, UUID()) })
-        let claims = content.claims.map { EvidenceClaim(id: ids[$0.key]!, text: $0.text, kind: $0.kind, scope: $0.scope, sourceIDs: $0.sourceIDs, quotes: $0.quotes, environment: $0.environment, dateQualifier: $0.dateQualifier) }
-        try PacketValidator.validateClaims(claims, excerpts: excerpts)
-        guard content.summaryClaimKeys.allSatisfy({ ids[$0] != nil }), Set(content.topics.map(\.key)).count == content.topics.count else { throw ProjectFailure("Prepared context contains invalid references.") }
-        let topics = try content.topics.map { topic -> PreparedTopic in
-            guard !topic.key.isEmpty, topic.key.count <= 60, !topic.title.isEmpty, topic.title.count <= 30,
-                  topic.reason.count <= 500, topic.claimKeys.allSatisfy({ ids[$0] != nil }) else { throw ProjectFailure("Invalid prepared topic.") }
-            return PreparedTopic(key: topic.key, title: topic.title, claimIDs: topic.claimKeys.compactMap { ids[$0] }, priority: topic.priority, reason: topic.reason)
+        let allKeys = Set(content.claims.map(\.key))
+        guard content.summaryClaimKeys.allSatisfy({ allKeys.contains($0) }), Set(content.topics.map(\.key)).count == content.topics.count,
+              content.topics.allSatisfy({ $0.claimKeys.allSatisfy { allKeys.contains($0) } }) else { throw ProjectFailure("Prepared context contains invalid references.") }
+        // Each claim carries its own evidence. Omit any claim that fails its checks (the model sometimes overruns
+        // a bound or misaligns quotes) rather than discarding every supported claim with it; never publish it.
+        let sources = PacketValidator.sourceIndex(excerpts)
+        var claims: [EvidenceClaim] = [], ids: [String: UUID] = [:], omitted: [(key: String, reason: String)] = []
+        for c in content.claims {
+            let claim = EvidenceClaim(id: UUID(), text: c.text, kind: c.kind, scope: c.scope, sourceIDs: c.sourceIDs, quotes: c.quotes, environment: c.environment, dateQualifier: c.dateQualifier)
+            do { try PacketValidator.validate(claim, sources: sources); claims.append(claim); ids[c.key] = claim.id }
+            catch { omitted.append((c.key, (error as? ProjectFailure)?.message ?? error.localizedDescription)) }
         }
-        let summary = content.summaryClaimKeys.compactMap { key in content.claims.first { $0.key == key }?.text }.joined(separator: " ")
+        // A mostly failing synthesis is not trustworthy as a whole; fail so any previous packet stays active.
+        guard !claims.isEmpty, omitted.count * 2 <= content.claims.count else {
+            let reasons = Set(omitted.map(\.reason)).sorted().joined(separator: " ")
+            throw ProjectFailure("\(omitted.count) of \(content.claims.count) prepared claims failed their evidence checks. \(reasons)")
+        }
+        try PacketValidator.validateClaims(claims, excerpts: excerpts)
+        let topics = try content.topics.compactMap { topic -> PreparedTopic? in
+            guard !topic.key.isEmpty, topic.key.count <= 60, !topic.title.isEmpty, topic.title.count <= 30,
+                  topic.reason.count <= 500 else { throw ProjectFailure("Invalid prepared topic.") }
+            let claimIDs = topic.claimKeys.compactMap { ids[$0] }
+            // A topic's free-text reason may restate an omitted claim, so a topic that lost any claim is dropped.
+            guard claimIDs.count == topic.claimKeys.count else { return nil }
+            return PreparedTopic(key: topic.key, title: topic.title, claimIDs: claimIDs, priority: topic.priority, reason: topic.reason)
+        }
+        let summary = content.summaryClaimKeys.filter { ids[$0] != nil }.compactMap { key in content.claims.first { $0.key == key }?.text }.joined(separator: " ")
         guard summary.split(whereSeparator: \.isWhitespace).count <= 250 else { throw ProjectFailure("Project summary exceeds 250 words.") }
         var notes = Array(content.coverageNotes.prefix(10))
+        if !omitted.isEmpty {
+            // Name what was dropped: an omitted claim may have qualified a surviving one.
+            let list = omitted.map { "\($0.key) (\($0.reason.trimmingCharacters(in: CharacterSet(charactersIn: "."))))" }.joined(separator: "; ")
+            notes.append("\(omitted.count) prepared claim(s) were omitted because they failed evidence checks: \(list). Surviving claims may lack qualifications those carried.")
+        }
         notes.append("Local project snapshot only; linked email, remote Git servers and live environments were not refreshed.")
         if !manifest.omissions.isEmpty { notes.append("Coverage omissions are listed in the source manifest; missing material is unknown.") }
         let markdown = brief(project: project, claims: claims, questions: content.openQuestions, notes: notes, excerpts: excerpts, cutoff: manifest.observedThrough)

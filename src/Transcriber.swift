@@ -176,6 +176,10 @@ final class ChannelTranscriber: @unchecked Sendable {
     }
 
     private func deliver(_ buffer: AVAudioPCMBuffer) {
+        // Several consumers on different threads read this buffer. AVAudioPCMBuffer builds its channel-pointer
+        // array lazily and not thread-safely: two first reads racing can see channel 0 as NULL (both live-meeting
+        // SIGSEGVs at 0x0). Build it here, on this serial queue, before anyone else can see the buffer.
+        PCM.publishChannelData(buffer)
         onAudio?(buffer)
         if let apple { apple.feed(buffer) }
         else { continuation?.yield(buffer) }
@@ -187,6 +191,29 @@ final class ChannelTranscriber: @unchecked Sendable {
         }
         await apple?.finish()
         _ = await consumer?.value
+    }
+}
+
+enum PCM {
+    /// Forces the buffer's lazily built channel-pointer array into existence on the calling thread.
+    static func publishChannelData(_ buffer: AVAudioPCMBuffer) {
+        switch buffer.format.commonFormat {
+        case .pcmFormatFloat32: _ = buffer.floatChannelData
+        case .pcmFormatInt16: _ = buffer.int16ChannelData
+        case .pcmFormatInt32: _ = buffer.int32ChannelData
+        default: break
+        }
+    }
+
+    /// Channel 0 of a Float32 buffer, or nil if the pointer is missing (never dereference a NULL channel).
+    static func channel0(_ buffer: AVAudioPCMBuffer) -> UnsafeMutablePointer<Float>? {
+        guard let channels = buffer.floatChannelData else { return nil }
+        return UnsafeMutablePointer<Float>(bitPattern: UInt(bitPattern: channels[0]))
+    }
+
+    static func floats(_ buffer: AVAudioPCMBuffer) -> [Float]? {
+        guard let p = channel0(buffer) else { return nil }
+        return Array(UnsafeBufferPointer(start: p, count: Int(buffer.frameLength)))
     }
 }
 

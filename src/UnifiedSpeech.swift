@@ -118,14 +118,18 @@ final class UnifiedSpeechStream {
 
     func feed(_ buffer: AVAudioPCMBuffer) async throws {
         let count = Int(buffer.frameLength)
-        if let samples = buffer.floatChannelData?[0] {
-            // Conservative acoustic endpoint. Individual quiet buffers accumulate; any voice resets it.
-            // Never gate ingestion: quiet or softly spoken samples still go through the ASR model.
-            var square: Float = 0
-            for i in 0..<count { square += samples[i] * samples[i] }
-            let rms = sqrt(square / Float(max(1, count)))
-            quietSamples = rms < 0.004 ? quietSamples + count : 0
+        // FluidAudio's appendAudio also dereferences channel 0 unchecked, so a NULL channel must stop here as a
+        // reported failure, not a crash. ChannelTranscriber.deliver publishes channel data so this cannot happen.
+        guard let samples = PCM.channel0(buffer) else {
+            throw NSError(domain: "MeetingScribe.Speech", code: 6,
+                          userInfo: [NSLocalizedDescriptionKey: "audio buffer has no channel data"])
         }
+        // Conservative acoustic endpoint. Individual quiet buffers accumulate; any voice resets it.
+        // Never gate ingestion: quiet or softly spoken samples still go through the ASR model.
+        var square: Float = 0
+        for i in 0..<count { square += samples[i] * samples[i] }
+        let rms = sqrt(square / Float(max(1, count)))
+        quietSamples = rms < 0.004 ? quietSamples + count : 0
         frames += Int64(count)
         try await model.appendAudio(buffer)
         try await model.processBufferedAudio()

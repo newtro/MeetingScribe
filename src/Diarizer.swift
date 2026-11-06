@@ -66,6 +66,7 @@ final class ChannelDiarizer: @unchecked Sendable {
     private var diarizer: Nemotron3Diarizer?
     private var disabled = false
     private var backlog: [Float] = []               // 16 kHz audio received before the model finished loading
+    // Caller-queue-only state (feed is called from the channel's one serial transcriber queue).
     private var converter: AVAudioConverter?
     private var converterInputFormat: AVAudioFormat?
     private let outFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
@@ -114,11 +115,14 @@ final class ChannelDiarizer: @unchecked Sendable {
         }
     }
 
-    /// Called on the capture queue with a buffer already handed to the analyzer. Only reads it (the analyzer
-    /// never mutates its input); conversion and inference happen on the diarization queue.
+    /// Called on the channel's transcriber queue with a buffer the speech engine also reads. The samples are
+    /// copied/converted here, synchronously, so the diarization queue never touches the shared buffer. A failed
+    /// conversion becomes silence of the same duration so frame `i` stays aligned with analyzer time.
     func feed(_ buf: AVAudioPCMBuffer) {
+        let samples = convert(buf)
+            ?? [Float](repeating: 0, count: Int((Double(buf.frameLength) * outFormat.sampleRate / buf.format.sampleRate).rounded()))
         queue.async { [self] in
-            guard !disabled, !finished, let samples = convert(buf), !samples.isEmpty else { return }
+            guard !disabled, !finished, !samples.isEmpty else { return }
             if let diarizer {
                 diarizer.appendAudio(samples)
                 process()
@@ -205,9 +209,7 @@ final class ChannelDiarizer: @unchecked Sendable {
 
     private func convert(_ buf: AVAudioPCMBuffer) -> [Float]? {
         let inFormat = buf.format
-        if inFormat == outFormat, let p = buf.floatChannelData?[0] {
-            return Array(UnsafeBufferPointer(start: p, count: Int(buf.frameLength)))
-        }
+        if inFormat == outFormat { return PCM.floats(buf) }
         if converter == nil || converterInputFormat != inFormat {
             converter = AVAudioConverter(from: inFormat, to: outFormat)
             converter?.primeMethod = .none
@@ -224,8 +226,8 @@ final class ChannelDiarizer: @unchecked Sendable {
             status.pointee = .haveData
             return buf
         }
-        guard err == nil, let p = out.floatChannelData?[0] else { return nil }
-        return Array(UnsafeBufferPointer(start: p, count: Int(out.frameLength)))
+        guard err == nil else { return nil }
+        return PCM.floats(out)
     }
 
     private func disable(_ why: String) {
